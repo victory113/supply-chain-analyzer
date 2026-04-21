@@ -19,7 +19,11 @@ app = FastAPI(title="Supply Chain Analyzer API")
 # Allow frontend to talk to backend (CORS = Cross-Origin Resource Sharing)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your frontend URL
+    allow_origins=[
+        "https://supply-chain-analyzer.netlify.app",
+        "http://localhost:3000",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
