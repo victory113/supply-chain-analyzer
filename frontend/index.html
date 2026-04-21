@@ -474,7 +474,7 @@
   // During local dev this is localhost; change for production deployment
   const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8000'
-    : '';  // Same origin in production
+    : 'https://supply-chain-analyzer-production-19db.up.railway.app';  // Same origin in production
 
   // ── RUN ANALYSIS ──
   async function runAnalysis() {
