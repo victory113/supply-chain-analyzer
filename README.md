@@ -176,5 +176,5 @@ const API = window.location.hostname === 'localhost'
 
 ## Author
 
-**Victory Orobosa** — CS Junior @ University of Central Arkansas  
+**Victory Orobosa** — CS Senior @ University of Central Arkansas  
 [LinkedIn](https://linkedin.com/in/YOUR_HANDLE) · [GitHub](https://github.com/YOUR_USERNAME) · [Live Demo](https://supply-chain-analyzer.netlify.app/)
