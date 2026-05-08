@@ -1,17 +1,50 @@
-# Supply Chain Disruption Analyzer
-### AI-powered risk detection for supply chain data
-**Built with:** Python · FastAPI · Anthropic Claude API · Vanilla JS/HTML
+# 🔗 Supply Chain Disruption Analyzer
+
+> AI-powered risk detection for supply chain data — upload a CSV, get instant anomaly detection, risk scores, and plain-English recommendations.
+
+**[Live Demo](https://supply-chain-analyzer.netlify.app/)** · Built by [Victory Orobosa](https://github.com/Victory113)
+
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
+![Claude API](https://img.shields.io/badge/Anthropic-Claude_API-D4A27F?style=flat)
+![Deployed on Railway](https://img.shields.io/badge/Backend-Railway-0B0D0E?style=flat&logo=railway)
+![Deployed on Netlify](https://img.shields.io/badge/Frontend-Netlify-00C7B7?style=flat&logo=netlify)
 
 ---
 
-## What this does
-Upload a CSV of supply chain data (shipments, vendors, delays, costs).  
-Claude AI reads the data and returns:
-- Top 3 identified risks, color-coded HIGH / MEDIUM / LOW
-- Plain-English explanation of each risk (no jargon)
-- Concrete recommendation per risk
-- Healthy signals in your data
-- **Compare mode:** Upload two CSVs (before/after a disruption) to see exactly what changed
+## What it does
+
+Supply chain managers deal with massive CSV exports — shipments, vendors, delays, costs — and no fast way to spot what's actually at risk. This app solves that.
+
+Upload your CSV and the app:
+
+- Identifies your **top 3 risks**, color-coded `HIGH` / `MEDIUM` / `LOW`
+- Explains each risk in **plain English** — no data jargon
+- Gives a **concrete recommendation** per risk
+- Surfaces **healthy signals** in your data so you know what's working
+- **Compare mode** — upload two CSVs (before/after a disruption) to see exactly what changed and why
+
+The LLM is grounded in your actual data at inference time, preventing hallucination and ensuring every recommendation is traceable to something real in your dataset.
+
+---
+
+## Tech stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| Backend | FastAPI (Python) | Async-native — ideal for external API calls |
+| AI | Anthropic Claude API | Best-in-class instruction following for structured output |
+| Frontend | Vanilla JS / HTML | No build step, instant deployment, zero dependencies |
+| Backend hosting | Railway | Auto-detects Python, simple env variable management |
+| Frontend hosting | Netlify | Continuous deployment from GitHub, free tier |
+
+---
+
+## Screenshots
+
+> **Upload screen** — drag and drop your CSV or load sample data to try it instantly
+
+![App UI](./screenshot.png)
 
 ---
 
@@ -22,8 +55,8 @@ supply-chain-analyzer/
 ├── backend/
 │   ├── main.py              ← FastAPI app + all API routes
 │   ├── requirements.txt     ← Python dependencies
-│   ├── .env.example         ← Copy this to .env and add your API key
-│   └── railway.toml         ← Deployment config for Railway
+│   ├── .env.example         ← Copy to .env and add your API key
+│   └── railway.toml         ← Railway deployment config
 │
 └── frontend/
     └── index.html           ← Complete single-file frontend (no build step)
@@ -31,169 +64,117 @@ supply-chain-analyzer/
 
 ---
 
-## Day 1 Setup Guide (do this in order)
+## Local setup
 
-### Step 1 — Get your tools installed
+### Prerequisites
 
-You need:
-- **Python 3.11+** — check with `python --version`. Download from python.org if needed.
-- **VS Code** — download from code.visualstudio.com (free)
-- **Git** — download from git-scm.com
+- Python 3.11+
+- An [Anthropic API key](https://console.anthropic.com/) (free to start — $5 in credits on signup)
+- Git
 
-Open VS Code, then open the `supply-chain-analyzer` folder.
-
-### Step 2 — Get your Anthropic API key
-
-1. Go to https://console.anthropic.com/
-2. Sign up (free to start — you get $5 in credits)
-3. Click "API Keys" in the left sidebar
-4. Click "Create Key" — copy it, you'll use it in the next step
-5. Keep this key private — never commit it to GitHub
-
-### Step 3 — Set up the backend
-
-Open a terminal in VS Code (`Ctrl+`` ` `` ` on Windows, `Cmd+`` ` `` ` on Mac).
+### 1. Clone the repo
 
 ```bash
-# Navigate into the backend folder
-cd backend
+git clone https://github.com/YOUR_USERNAME/supply-chain-analyzer.git
+cd supply-chain-analyzer
+```
 
-# Create a virtual environment (this keeps your dependencies isolated)
+### 2. Set up the backend
+
+```bash
+cd backend
 python -m venv venv
 
-# Activate it:
-# On Mac/Linux:
+# Mac/Linux:
 source venv/bin/activate
-# On Windows:
+# Windows:
 venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Create your .env file (this stores your secret API key)
 cp .env.example .env
 ```
 
-Now open `.env` in VS Code and replace `your_api_key_here` with your real Anthropic API key.
+Open `.env` and add your Anthropic API key:
 
-### Step 4 — Run the backend
+```
+ANTHROPIC_API_KEY=your_key_here
+```
 
-With your virtual environment still active:
+### 3. Run the backend
 
 ```bash
 uvicorn main:app --reload
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-```
+Visit `http://localhost:8000` — you should see `{"message": "Supply Chain Analyzer API is running!"}`
 
-Open http://localhost:8000 in your browser — you'll see: `{"message": "Supply Chain Analyzer API is running!"}`
+### 4. Run the frontend
 
-**What `--reload` does:** Automatically restarts the server when you save changes to main.py.  
-**What `uvicorn` is:** A fast Python web server that runs your FastAPI app.
-
-### Step 5 — Run the frontend
-
-Open a new terminal tab (leave the backend running in the first one).
+Open a new terminal tab (keep the backend running):
 
 ```bash
-# Navigate to frontend folder
 cd frontend
-
-# Python has a built-in web server for local development:
 python -m http.server 3000
 ```
 
-Open http://localhost:3000 in your browser. You should see the full app UI.
+Visit `http://localhost:3000` and the full app UI will load.
 
-### Step 6 — Test it end-to-end
+### 5. Test it end-to-end
 
-1. In the app, click "Load sample data to try it out"
-2. Click "Analyze with AI"
-3. Watch it call your local backend, which calls Claude, and render results
-
-If it works — congratulations! You just ran a full-stack AI app locally.
+1. Click **"Load sample data to try it out"**
+2. Click **"Analyze with AI"**
+3. Watch it call your backend → Claude → render results
 
 ---
 
-## Day 2 — Deployment Guide
+## How the AI works
 
-### Step 1 — Push to GitHub
+The prompt is engineered to return **structured JSON**, which the frontend renders dynamically. This means:
 
-```bash
-# Go back to the root folder
-cd ..
+- No string parsing fragility — the response is always machine-readable
+- Risk levels (`HIGH` / `MEDIUM` / `LOW`) are always consistent
+- The compare feature sends both datasets in a single prompt and asks the model to reason about what changed between them
+- The API key lives only in the backend environment — it never touches the frontend or the client
 
-# Initialize a git repo
-git init
-git add .
-git commit -m "Initial commit: Supply Chain Analyzer"
-```
+---
 
-Go to github.com → New Repository → name it `supply-chain-analyzer` → Create.
+## Deployment
 
-```bash
-# Connect your local repo to GitHub (replace YOUR_USERNAME)
-git remote add origin https://github.com/YOUR_USERNAME/supply-chain-analyzer.git
-git push -u origin main
-```
+### Backend → Railway
 
-### Step 2 — Deploy backend on Railway (free)
+1. Push your repo to GitHub
+2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
+3. Add environment variable: `ANTHROPIC_API_KEY = your_key`
+4. Railway auto-detects Python and deploys — you'll get a live URL
 
-1. Go to https://railway.app and sign in with GitHub
-2. Click "New Project" → "Deploy from GitHub repo"
-3. Select your `supply-chain-analyzer` repo
-4. Railway will detect it's a Python project automatically
-5. In the Railway dashboard, click "Variables" → "Add Variable"
-   - Key: `ANTHROPIC_API_KEY`
-   - Value: your actual API key
-6. Railway will deploy your backend and give you a URL like: `https://supply-chain-analyzer-production.up.railway.app`
+### Frontend → Netlify
 
-### Step 3 — Deploy frontend on Netlify (free)
+1. Go to [netlify.com](https://netlify.com) → Add new site → Import from GitHub
+2. Set base directory to `frontend`
+3. No build command needed
+4. In `frontend/index.html`, update the API constant to your Railway URL:
 
-1. Go to https://netlify.com and sign in with GitHub
-2. Click "Add new site" → "Import an existing project"
-3. Select your GitHub repo
-4. Set "Base directory" to `frontend`
-5. No build command needed — it's just a static HTML file
-6. Click "Deploy site"
-7. Once deployed, go to Site Settings → Environment → add the Railway backend URL
-
-**Important:** After deploying the frontend, open `frontend/index.html` and find the line:
 ```javascript
-const API = window.location.hostname === 'localhost' ...
-  : '';  // Same origin in production
+const API = window.location.hostname === 'localhost'
+  ? 'http://localhost:8000'
+  : 'https://your-app.up.railway.app';
 ```
-Change the empty string `''` to your Railway backend URL:
-```javascript
-: 'https://supply-chain-analyzer-production.up.railway.app'
-```
-Commit and push — Netlify will auto-redeploy.
+
+5. Push and Netlify auto-redeploys
 
 ---
 
-## How to explain this project in an interview
+## What's next
 
-**The one-sentence pitch:**
-"I built a full-stack AI application that lets supply chain managers upload CSV data and receive LLM-generated risk analysis, anomaly detection, and plain-English recommendations — grounded in actual data to prevent hallucination."
-
-**Technical talking points:**
-- "The backend is FastAPI — I chose it because it's async-native, which matters when you're waiting on an external API call like Claude"
-- "I engineered the prompt to return structured JSON, which lets the frontend render results dynamically without any parsing fragility"
-- "The compare feature sends two datasets in a single prompt and asks the model to reason about what changed between them"
-- "I deployed the backend on Railway with environment variables for the API key — the key never touches the frontend"
-
-**The Palantir angle:**
-"This is essentially a miniature version of what Palantir's AIP does — taking an organization's operational data and surfacing AI-generated insights to non-technical stakeholders in a clean interface."
+- [ ] Risk distribution chart (Chart.js)
+- [ ] CSV column mapping — let users label what each column means
+- [ ] Export analysis as a PDF report
+- [ ] Historical tracking — store past analyses in SQLite
+- [ ] Real dataset integration (USDA food supply data from data.gov)
 
 ---
 
-## What to add next (for extra points)
+## Author
 
-- [ ] Add a chart showing risk distribution (Chart.js)
-- [ ] Add CSV column mapping (let users tell the app what each column means)
-- [ ] Add export: save the AI analysis as a PDF report
-- [ ] Add historical tracking: store past analyses in SQLite
-- [ ] Swap sample data for a real open dataset (e.g. USDA food supply data from data.gov)
+**Victory Orobosa** — CS Junior @ University of Central Arkansas  
+[LinkedIn](https://linkedin.com/in/YOUR_HANDLE) · [GitHub](https://github.com/YOUR_USERNAME) · [Live Demo](https://supply-chain-analyzer.netlify.app/)
