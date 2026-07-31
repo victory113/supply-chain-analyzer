@@ -1,0 +1,40 @@
+[project]
+name = "supply-chain-analyzer"
+version = "2.0.0"
+description = "AI supply chain intelligence platform"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+# CSV fixtures are verbatim header rows — wrapping them would change the data.
+"tests/**" = ["E501"]
+# conftest sets test env vars before importing the app, so its settings
+# singleton is built with the test configuration.
+"tests/conftest.py" = ["E402", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+disallow_untyped_defs = true
+exclude = ["alembic/"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
