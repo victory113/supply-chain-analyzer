@@ -1,0 +1,89 @@
+name: supply-chain-analyzer
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sca
+      POSTGRES_PASSWORD: sca
+      POSTGRES_DB: sca
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sca -d sca"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Runs migrations once, then exits. api and worker wait on its success so
+  # neither ever starts against an un-migrated schema.
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment: &backend_env
+      DATABASE_URL: postgresql+asyncpg://sca:sca@postgres:5432/sca
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-dev-only-insecure-key-change-me}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment: *backend_env
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mounted for hot reload in development; the image is self-contained
+      # without this in CI and production.
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 -Q analysis
+    environment: *backend_env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:

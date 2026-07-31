@@ -1,0 +1,53 @@
+# Render blueprint: API, Celery worker, Postgres, and Redis as separate
+# services. `render blueprint launch` (or connecting the repo in the Render
+# dashboard) provisions all four.
+services:
+  - type: web
+    name: sca-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /api/v1/health
+    # Migrations run on deploy, before the new instance takes traffic.
+    preDeployCommand: alembic upgrade head
+    envVars: &backend_env
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sca-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sca-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false # set in the dashboard; never committed
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_JSON
+        value: "true"
+      - key: CORS_ORIGINS
+        sync: false # your deployed frontend origin
+
+  - type: worker
+    name: sca-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    dockerCommand: celery -A app.workers.celery_app worker --loglevel=info -Q analysis
+    envVars: *backend_env
+
+  - type: redis
+    name: sca-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # internal access only
+
+databases:
+  - name: sca-postgres
+    plan: basic-256mb
+    postgresMajorVersion: "16"
