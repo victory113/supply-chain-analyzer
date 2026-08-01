@@ -229,7 +229,7 @@ cd backend
 pytest --cov=app
 ```
 
-149 tests, all passing, in about 20 seconds.
+161 tests, all passing, in about 20 seconds.
 
 | Suite | Covers |
 |---|---|

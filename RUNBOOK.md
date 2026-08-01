@@ -271,7 +271,7 @@ for vendors.
 ```powershell
 cd backend
 .venv\Scripts\activate
-pytest                    # 149 tests, ~20s
+pytest                    # 161 tests, ~20s
 ```
 
 ```powershell

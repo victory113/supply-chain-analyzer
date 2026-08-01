@@ -16,6 +16,11 @@ htmlcov/
 .env.local
 *.local
 
+# Local dev database — created at startup, never shared
+*.db
+*.sqlite
+*.sqlite3
+
 # Node / frontend
 node_modules/
 dist/

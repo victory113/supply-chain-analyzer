@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# libpq connection parameters that asyncpg does not accept. asyncpg passes
+# unknown query parameters through as connect() kwargs, so leaving these in
+# raises TypeError at first connection rather than failing at startup.
+_LIBPQ_ONLY_PARAMS = ("channel_binding",)
 
 
 class Settings(BaseSettings):
@@ -58,6 +64,40 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
     max_rows_per_upload: int = 50_000
     max_rows_in_prompt: int = 200
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_dsn(cls, value: object) -> object:
+        """Make a managed provider's connection string usable by asyncpg.
+
+        Neon, Render, Heroku and friends hand out libpq-style URLs, which fail
+        here in two different ways:
+
+        1. ``postgres://`` / ``postgresql://`` resolves to psycopg, which this
+           app doesn't install — the whole data layer is async.
+        2. ``?sslmode=require`` is a libpq parameter; asyncpg's equivalent is
+           ``ssl``, and it raises TypeError on the former.
+
+        Both are guaranteed failures on first connect, so they're normalised
+        here rather than left as a deployment footgun.
+        """
+        if not isinstance(value, str) or not value:
+            return value
+
+        dsn = value
+        for prefix in ("postgresql://", "postgres://"):
+            if dsn.startswith(prefix):
+                dsn = "postgresql+asyncpg://" + dsn[len(prefix) :]
+                break
+
+        if "+asyncpg" in dsn:
+            dsn = re.sub(r"([?&])sslmode=", r"\1ssl=", dsn)
+            for param in _LIBPQ_ONLY_PARAMS:
+                dsn = re.sub(rf"[?&]{param}=[^&]*", "", dsn)
+            # Removing the first parameter can leave a dangling separator.
+            dsn = dsn.replace("?&", "?").rstrip("?&")
+
+        return dsn
 
     @field_validator("cors_origins", mode="before")
     @classmethod
