@@ -175,8 +175,17 @@ Add the live link to the README, replacing the old Netlify URL near the top:
 **[Live demo](https://your-site.netlify.app)** · [Source](https://github.com/victory113/supply-chain-analyzer)
 ```
 
-Also replace `screenshot.png` — the one in the repo shows the old v1 interface,
-not this dashboard. Take a fresh one of the upload detail page.
+Then add a screenshot. The repo has none — the old one showed the v1 interface
+and was removed. Take a fresh capture of the upload detail page (KPIs, risk
+gauge and vendor chart in one frame), save it as `screenshot.png` at the repo
+root, and reference it under the intro:
+
+```markdown
+![Dashboard](./screenshot.png)
+```
+
+Most people who see the repo will never clone it, so this is doing more work
+than the architecture section.
 
 ---
 
