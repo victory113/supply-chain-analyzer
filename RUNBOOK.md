@@ -2,35 +2,112 @@
 
 How to launch this app, demo it, and answer questions about it.
 
+**Two things to remember before anything else:**
+
+1. **Two terminals, and both stay open.** Terminal 1 runs the backend (the
+   brain, port 8000). Terminal 2 runs the frontend (the screen, port 5173).
+   Close either one and the app stops working.
+2. **You visit `localhost:5173`, not `8000`.** 5173 is the website. 8000 is the
+   API it talks to behind the scenes.
+
 ---
 
-## 1. Launch it (two terminals)
+## 0. Start here — step by step
 
-### Terminal 1 — backend
+### Step 1. Open the project in VS Code
+
+**File → Open Folder** →
+`C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer`
+
+*You should see:* a file tree with `backend`, `frontend`, `README.md`, `RUNBOOK.md`.
+
+### Step 2. Open a terminal
+
+Press `` Ctrl + ` `` (Control + backtick, the key above Tab).
+
+*You should see:* a panel at the bottom with a prompt ending in `>`.
+
+### Step 3. Start the backend
+
+Paste this whole line and press Enter:
 
 ```powershell
-cd "C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer\backend"
-.venv\Scripts\activate
-$env:DATABASE_URL="sqlite+aiosqlite:///./dev.db"
-uvicorn app.main:app --reload
+cd "C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer\backend"; $env:DATABASE_URL="sqlite+aiosqlite:///./dev.db"; .venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Wait for `Application startup complete.` on port 8000.
+*You should see:*
 
-### Terminal 2 — frontend
+```
+schema_bootstrap_complete   dsn_kind=sqlite tables=5
+INFO:  Application startup complete.
+INFO:  Uvicorn running on http://127.0.0.1:8000
+```
+
+Leave this terminal alone from now on. It will look frozen — that is correct.
+The server is sitting there waiting for requests.
+
+### Step 4. Open a second terminal
+
+Click the `+` icon at the top-right of the terminal panel (or the split-pane
+icon next to it).
+
+*You should see:* a second, empty prompt. The backend keeps running in the first.
+
+### Step 5. Start the frontend
+
+Paste this into the **new** terminal and press Enter:
 
 ```powershell
-cd "C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer\frontend"
-npm run dev
+cd "C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer\frontend"; npm run dev
 ```
 
-Then open **http://localhost:5173**.
+*You should see:*
 
-### What each line actually does
+```
+VITE v6.4.3  ready in 993 ms
+➜  Local:   http://localhost:5173/
+```
+
+### Step 6. Open the app
+
+Browser → **http://localhost:5173**
+
+*You should see:* a dark "Sign in" page.
+
+### Step 7. Use it
+
+1. Click **Create one** at the bottom.
+2. Email: anything (`me@test.com`). Password: `test-pass-2026` — needs 8+
+   characters and can't be only letters.
+3. **Create account** → you land on the dashboard.
+4. Click **Try sample data**.
+5. Watch the order: charts and numbers appear **immediately**, the AI section
+   fills in ~12 seconds later. That gap is the point of the whole design.
+
+### Step 8. Stop it
+
+Click into each terminal and press `Ctrl + C`. Do it in both.
+
+### If something goes wrong
+
+| You see | Do this |
+|---|---|
+| `ModuleNotFoundError` | Wrong folder. Re-paste the whole Step 3 line — the `cd` is part of it. |
+| `'npm' is not recognized` | Close that terminal, open a fresh one, retry Step 5. |
+| `address already in use` | A server is already running. Run `Get-Process python,node -ErrorAction SilentlyContinue \| Stop-Process -Force`, then retry. |
+| "Could not reach the server" in the browser | Terminal 1 isn't running. Redo Step 3. |
+| Page won't load at all | Terminal 2 isn't running. Redo Step 5. |
+| Upload works but the AI section stays empty | No `ANTHROPIC_API_KEY` in `backend/.env`. Expected — every metric still works. |
+
+---
+
+## 1. Reference: what those commands actually do
+
+Worth knowing so you can fix it live when something fails in front of someone.
 
 | Line | Why it's there |
 |---|---|
-| `.venv\Scripts\activate` | Puts this project's Python packages on the path. Without it you get `ModuleNotFoundError: fastapi`. |
+| `.venv\Scripts\python.exe` | Runs *this project's* Python, which has the packages installed. Using plain `python` gets you `ModuleNotFoundError: fastapi`. (`.venv\Scripts\activate` does the same thing for a whole session, but can trip PowerShell's execution policy — calling the exe directly avoids that.) |
 | `$env:DATABASE_URL="sqlite+..."` | Overrides the Postgres default. On a SQLite DSN the app creates its own tables at startup and skips Alembic — see `app/db/init_db.py`. Everything else about the app is identical. |
 | `uvicorn app.main:app` | `app.main` is the module, `app` is the FastAPI instance built by `create_app()`. `--reload` restarts on file save. |
 | `npm run dev` | Vite dev server on 5173. It proxies `/api` → `localhost:8000` (`vite.config.ts`), which is why there's no CORS setup in development. |
@@ -38,16 +115,6 @@ Then open **http://localhost:5173**.
 You do **not** need Postgres, Redis, Docker, or a Celery worker for this. The
 app detects each one is missing and degrades — that's deliberate, and it's
 covered in §5.
-
-### If something goes wrong
-
-| Symptom | Cause and fix |
-|---|---|
-| `ModuleNotFoundError: fastapi` | venv not activated. Re-run `.venv\Scripts\activate` — your prompt should show `(.venv)`. |
-| `'node' is not recognized` | Terminal opened before Node was installed. Open a fresh terminal. |
-| `[Errno 10048] address already in use` | A previous server is still up. Kill it: `Get-Process python,node -ErrorAction SilentlyContinue \| Stop-Process -Force` |
-| Frontend loads, login says "Could not reach the server" | Backend isn't running, or isn't on 8000. Check Terminal 1. |
-| Upload succeeds, AI section stays empty | No `ANTHROPIC_API_KEY` in `backend/.env`. Expected — the metrics still work. |
 
 ---
 
