@@ -21,10 +21,10 @@ services:
     plan: free
     healthCheckPath: /api/v1/health
 
-    # Free plans have no pre-deploy hook, so migrations run at container start.
-    # `alembic upgrade head` is a no-op when the schema is already current.
-    # The image's own CMD already binds $PORT, so this only prepends migrations.
-    dockerCommand: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    # No dockerCommand on purpose. The image's entrypoint script already runs
+    # migrations and binds $PORT. An inline `sh -c "a && b"` here fails with
+    # exit 127, because Render runs this field through a shell already and the
+    # nested quoting collapses into a single unfound program name.
 
     envVars:
       # Neon connection string. Pasted as-is from the Neon dashboard — the app

@@ -36,6 +36,10 @@ COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY --chown=appuser:appuser . .
 
+# Git on Windows doesn't preserve the executable bit, so set it here rather
+# than relying on the checked-in file mode.
+RUN chmod +x /app/docker-entrypoint.sh
+
 USER appuser
 
 # Documentation only — the actual port comes from $PORT at runtime.
@@ -47,4 +51,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS "http://localhost:${PORT:-8000}/api/v1/health" || exit 1
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# CMD rather than ENTRYPOINT so docker-compose can still override it to run
+# the Celery worker or a one-off migration.
+CMD ["/app/docker-entrypoint.sh"]

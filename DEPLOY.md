@@ -90,6 +90,7 @@ service marked **Live**.
 
 | Log says | Fix |
 |---|---|
+| `sh: 1: ...: not found` / `Exited with status 127` | Something is wrapping the start command in a second shell. Render already runs `dockerCommand` through one, so `sh -c "a && b"` collapses into a single unfound program name. The image's entrypoint script handles startup — leave `dockerCommand` unset. |
 | `alembic.util.exc.CommandError` or connection refused | `DATABASE_URL` is wrong or incomplete. Re-copy from Neon — it's easy to miss the end of the string. |
 | `password authentication failed` | Password got truncated on copy. Re-copy the whole line. |
 | `No module named 'app'` | Docker context is wrong. Confirm `render.yaml` is at the repo root, unedited. |
