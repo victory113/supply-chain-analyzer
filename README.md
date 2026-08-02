@@ -12,6 +12,8 @@ Upload supply chain CSVs, get computed risk analytics and AI-generated explanati
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
 ![Claude API](https://img.shields.io/badge/Anthropic-Claude_API-D4A27F?style=flat)
 
+![Dashboard — computed KPIs, composite risk score with its weighted drivers, and the monthly delay trend](./screenshot.png)
+
 ---
 
 ## The core design decision
