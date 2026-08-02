@@ -21,10 +21,16 @@ services:
     plan: free
     healthCheckPath: /api/v1/health
 
-    # No dockerCommand on purpose. The image's entrypoint script already runs
-    # migrations and binds $PORT. An inline `sh -c "a && b"` here fails with
-    # exit 127, because Render runs this field through a shell already and the
-    # nested quoting collapses into a single unfound program name.
+    # Points at the entrypoint script rather than an inline command. Two
+    # reasons, both learned the hard way:
+    #   1. `sh -c "a && b"` here exits 127 — Render runs this field through a
+    #      shell already, so the nested quoting collapses into one program name.
+    #   2. Render *stores* this value on the service when the blueprint is
+    #      first applied. Deleting the field from this file does not clear it,
+    #      so a stale command keeps running until it is overwritten. Setting it
+    #      explicitly is what makes a re-apply self-correcting.
+    # The script runs migrations, then execs uvicorn on $PORT.
+    dockerCommand: /app/docker-entrypoint.sh
 
     envVars:
       # Neon connection string. Pasted as-is from the Neon dashboard — the app

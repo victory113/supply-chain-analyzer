@@ -90,7 +90,8 @@ service marked **Live**.
 
 | Log says | Fix |
 |---|---|
-| `sh: 1: ...: not found` / `Exited with status 127` | Something is wrapping the start command in a second shell. Render already runs `dockerCommand` through one, so `sh -c "a && b"` collapses into a single unfound program name. The image's entrypoint script handles startup — leave `dockerCommand` unset. |
+| `sh: 1: ...: not found` / `Exited with status 127` | The start command is being wrapped in a second shell. Render runs `dockerCommand` through one already, so `sh -c "a && b"` collapses into a single unfound program name. It should be `/app/docker-entrypoint.sh`. |
+| The build log shows your new layers, but the runtime error is unchanged | Render **stored** `dockerCommand` on the service when the blueprint was first applied, and editing `render.yaml` does not clear it. Fix it in the dashboard: service → **Settings** → **Docker Command** → set to `/app/docker-entrypoint.sh` → Save. Same applies to any env var you set at blueprint-apply time. |
 | `alembic.util.exc.CommandError` or connection refused | `DATABASE_URL` is wrong or incomplete. Re-copy from Neon — it's easy to miss the end of the string. |
 | `password authentication failed` | Password got truncated on copy. Re-copy the whole line. |
 | `No module named 'app'` | Docker context is wrong. Confirm `render.yaml` is at the repo root, unedited. |
