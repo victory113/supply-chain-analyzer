@@ -1,0 +1,23 @@
+# Normalise text files to LF in the repository.
+* text=auto
+
+# Files consumed by Linux containers must keep LF on checkout regardless of
+# platform. A CRLF shebang makes the kernel look for "/bin/sh\r", which fails
+# with the famously unhelpful "not found" — for a file that plainly exists.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.dockerignore  text eol=lf
+docker-compose.yml text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Windows-native tooling, kept CRLF.
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.ico binary
+*.db  binary
