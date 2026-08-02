@@ -2,6 +2,12 @@
 
 Upload supply chain CSVs, get computed risk analytics and AI-generated explanations, and track how performance changes over time.
 
+### ▶ [Try it live](https://supply-chain-analyzer.netlify.app/) · [API docs](https://sca-api-o5p5.onrender.com/docs)
+
+Create an account with any email, click **Try sample data**, and the dashboard fills in immediately. The AI risk assessment follows a few seconds later — that gap is the architecture, not lag.
+
+> **First load takes 30–60 seconds.** The API runs on a free tier that sleeps when idle; it wakes on the first request. Reload if it errors once.
+
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react&logoColor=black)
@@ -331,7 +337,7 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
-The dev server proxies `/api` to `http://localhost:8000`, so the frontend uses the same relative URLs in development and production and never triggers CORS locally. In production the Netlify redirect in `netlify.toml` does the same job — point it at your deployed backend.
+The dev server proxies `/api` to `http://localhost:8000`, so the frontend uses the same relative URLs in development and production and never triggers CORS locally. In production the Netlify redirect in `netlify.toml` does the same job, forwarding to the deployed Render service.
 
 ```bash
 npm run test         # Vitest + Testing Library
@@ -368,4 +374,6 @@ The original single-file v1 UI is preserved at [legacy/v1-single-file-ui.html](l
 
 **Victory Orobosa** — CS Senior @ University of Central Arkansas
 
-[GitHub](https://github.com/victory113/supply-chain-analyzer)
+[Live demo](https://supply-chain-analyzer.netlify.app/) · [Source](https://github.com/victory113/supply-chain-analyzer) · [API docs](https://sca-api-o5p5.onrender.com/docs)
+
+Frontend on Netlify · API and worker on Render · Postgres on Neon
