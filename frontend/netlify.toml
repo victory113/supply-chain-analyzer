@@ -14,10 +14,13 @@
 
 # Proxy the API through the same origin so the browser never makes a
 # cross-origin request and no CORS preflight is needed in production.
-# Set API_ORIGIN in the Netlify UI to your deployed backend.
+#
+# `:splat` is the wildcard captured by `from = "/api/*"` and must be kept —
+# without it every call lands on the backend's root instead of the endpoint,
+# so /api/v1/auth/login would return the service banner rather than a token.
 [[redirects]]
   from = "/api/*"
-  to = " https://sca-api-o5p5.onrender.com"
+  to = "https://sca-api-o5p5.onrender.com/api/:splat"
   status = 200
   force = true
 
