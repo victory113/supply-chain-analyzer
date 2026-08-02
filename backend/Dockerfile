@@ -37,9 +37,14 @@ WORKDIR /app
 COPY --chown=appuser:appuser . .
 
 USER appuser
+
+# Documentation only — the actual port comes from $PORT at runtime.
 EXPOSE 8000
 
+# PaaS platforms (Render, Fly, Cloud Run) inject $PORT and expect the process
+# to bind it. Both the healthcheck and the entrypoint honour it, defaulting to
+# 8000 for docker-compose and local runs.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/api/v1/health || exit 1
+    CMD curl -fsS "http://localhost:${PORT:-8000}/api/v1/health" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
