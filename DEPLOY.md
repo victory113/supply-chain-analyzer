@@ -21,8 +21,8 @@ free web service does not.
 
 Everything below deploys from GitHub, so the code has to be there first.
 
-```powershell
-cd "C:\Users\Owner\Documents\OneDrive\personal project\supply-chain-analyzer\supply-chain-analyzer"
+```bash
+cd supply-chain-analyzer
 git push origin main
 ```
 

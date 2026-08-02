@@ -27,6 +27,9 @@ dist/
 build/
 .vite/
 
+# Personal working notes — kept locally, not published
+RUNBOOK.md
+
 # Editors & OS
 .DS_Store
 .idea/
