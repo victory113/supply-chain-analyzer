@@ -106,8 +106,10 @@ good for quick checks.
 **data.gov** — search "shipment", "procurement", or "freight" for government
 procurement and logistics exports.
 
-A tiny hand-made file works too: `backend/sample_shipments.csv` in this repo is
-four rows and exercises the whole pipeline.
+**In this repo:** [`sample_data/shipments_2024.csv`](sample_data/shipments_2024.csv)
+— 2,400 orders across six suppliers and a full year, with no delay, status, or
+lead-time column, so every metric has to be derived. `backend/sample_shipments.csv`
+is a four-row version for quick smoke tests.
 
 ---
 

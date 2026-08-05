@@ -113,6 +113,30 @@ class TestDataCoSmartSupplyChain:
         assert periods == {"2024-01", "2024-02", "2024-03"}
 
 
+class TestPromisedDateNaming:
+    """The promised-date column has many names, and missing one is silent: the
+    delay never gets derived, so the file reads as 100% on-time."""
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            b"Promised Delivery Date",
+            b"Scheduled Delivery Date",
+            b"Expected Delivery Date",
+            b"Planned Delivery Date",
+            b"Committed Delivery Date",
+            b"Estimated Arrival Date",
+            b"Due Date",
+            b"ETA",
+        ],
+    )
+    def test_promised_date_aliases_all_derive_a_delay(self, service, header: bytes):
+        csv = b"Vendor," + header + b",Actual Delivery Date\n" b"Acme,2024-01-10,2024-01-24\n"
+        result = service.parse(csv, UPLOAD_ID)
+        assert result.shipments[0].delay_days == 14, f"{header!r} did not map"
+        assert result.report.derived_delays == 1
+
+
 class TestDelimiters:
     def test_semicolon_separated_export_is_detected(self, service):
         # The default separator in locales that use a comma for decimals.
