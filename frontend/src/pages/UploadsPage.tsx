@@ -35,8 +35,10 @@ export function UploadsPage() {
     onSuccess: (accepted) => {
       void queryClient.invalidateQueries({ queryKey: ['uploads'] });
       // Straight to the detail page — that's where the progress banner and
-      // results live, so there's nothing useful to stay here for.
-      navigate(`/uploads/${accepted.upload.id}`);
+      // results live, so there's nothing useful to stay here for. The parse
+      // report rides along in router state: it only exists in this POST
+      // response, and refetching the upload later wouldn't recover it.
+      navigate(`/uploads/${accepted.upload.id}`, { state: { ingest: accepted.ingest } });
     },
   });
 

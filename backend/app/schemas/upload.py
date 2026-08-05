@@ -23,6 +23,19 @@ class UploadRead(ORMModel):
     created_at: datetime
 
 
+class IngestReport(BaseModel):
+    """What the parser made of the file — returned so users can fix bad exports."""
+
+    accepted_rows: int
+    rejected_rows: int
+    # Rows whose delay the app computed from a date pair rather than read from
+    # a column. Reported so an invented number never looks like a supplied one.
+    derived_delays: int = 0
+    detected_columns: dict[str, str]
+    unmapped_columns: list[str]
+    warnings: list[str]
+
+
 class UploadAccepted(BaseModel):
     """202 response: the CSV is stored, the AI analysis is queued."""
 
@@ -30,6 +43,10 @@ class UploadAccepted(BaseModel):
     analysis_id: uuid.UUID
     task_id: str | None
     poll_url: str
+    # What the parser made of the file: which columns it recognised, which it
+    # ignored, and what it had to derive. Shown to the user immediately, before
+    # the AI narration arrives.
+    ingest: IngestReport | None = None
 
 
 class ShipmentRead(ORMModel):
@@ -46,13 +63,3 @@ class ShipmentRead(ORMModel):
     status: ShipmentStatus
     shipped_on: date | None
     last_updated: date | None
-
-
-class IngestReport(BaseModel):
-    """What the parser made of the file — returned so users can fix bad exports."""
-
-    accepted_rows: int
-    rejected_rows: int
-    detected_columns: dict[str, str]
-    unmapped_columns: list[str]
-    warnings: list[str]

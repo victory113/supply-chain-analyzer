@@ -14,6 +14,14 @@ interface UseAnalysisStatusOptions {
   analysisId: string | null;
   /** Skip polling when the caller already knows the analysis finished. */
   enabled?: boolean;
+  /**
+   * Status from the already-loaded analysis record. Required whenever
+   * `enabled` is false: with polling off there is no query data, and without
+   * this the hook would report `null` — which reads as "not started yet" and
+   * leaves a finished analysis under a spinner forever.
+   */
+  knownStatus?: AnalysisStatus | null;
+  knownError?: string | null;
 }
 
 export interface AnalysisProgress {
@@ -36,6 +44,8 @@ export interface AnalysisProgress {
 export function useAnalysisStatus({
   analysisId,
   enabled = true,
+  knownStatus = null,
+  knownError = null,
 }: UseAnalysisStatusOptions): AnalysisProgress {
   const query = useQuery({
     queryKey: queryKeys.analysisStatus(analysisId ?? 'none'),
@@ -61,7 +71,8 @@ export function useAnalysisStatus({
     if (dataUpdatedAt > 0) setPollCount((count) => count + 1);
   }, [dataUpdatedAt]);
 
-  const status = query.data?.status ?? null;
+  // Live poll wins; the record we loaded with the page is the fallback.
+  const status = query.data?.status ?? knownStatus;
   const isComplete = status === 'completed';
   const isFailed = status === 'failed';
   const isPending = status === 'queued' || status === 'running';
@@ -74,6 +85,6 @@ export function useAnalysisStatus({
     // Still not terminal after the poll budget is spent — surface it rather
     // than spinning forever.
     timedOut: isPending && pollCount >= MAX_POLLS,
-    errorMessage: query.data?.error_message ?? null,
+    errorMessage: query.data?.error_message ?? knownError,
   };
 }

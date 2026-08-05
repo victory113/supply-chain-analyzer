@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import uuid
+from typing import IO
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, Query, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.config import settings
@@ -60,17 +63,22 @@ async def create_upload(
     Returns 202 rather than 200: the rows are durably saved, but the model call
     is still pending. Poll ``poll_url`` for the analysis status.
     """
-    content = await file.read()
-    if len(content) > settings.max_upload_bytes:
+    # Starlette spools the body to a temp file past a threshold, so the upload
+    # is never fully resident in memory. Measure it by seeking rather than
+    # reading, and hand the stream to the parser to consume in batches.
+    size_bytes = await run_in_threadpool(_stream_size, file.file)
+    if size_bytes > settings.max_upload_bytes:
         raise PayloadTooLargeError(
-            f"File exceeds the {settings.max_upload_bytes // 1_048_576} MB limit."
+            f"File is {size_bytes / 1_048_576:.1f} MB; the limit is "
+            f"{settings.max_upload_bytes // 1_048_576} MB."
         )
 
     service = AnalysisService(session)
-    upload, analysis, _ = await service.create_upload(
+    upload, analysis, ingest = await service.create_upload(
         user_id=current_user.id,
         filename=file.filename or "upload.csv",
-        content=content,
+        stream=file.file,
+        size_bytes=size_bytes,
         label=label,
     )
 
@@ -81,7 +89,17 @@ async def create_upload(
         analysis_id=analysis.id,
         task_id=task_id,
         poll_url=f"{settings.api_v1_prefix}/analyses/{analysis.id}/status",
+        ingest=ingest,
     )
+
+
+def _stream_size(stream: IO[bytes]) -> int:
+    """Byte length of an open stream, leaving the position where it started."""
+    start = stream.tell()
+    stream.seek(0, io.SEEK_END)
+    size = stream.tell()
+    stream.seek(start)
+    return size
 
 
 def _enqueue_analysis(analysis_id: uuid.UUID, background: BackgroundTasks) -> str | None:

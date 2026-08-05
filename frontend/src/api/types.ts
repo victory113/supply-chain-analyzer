@@ -81,11 +81,23 @@ export interface Upload {
   created_at: string;
 }
 
+export interface IngestReport {
+  accepted_rows: number;
+  rejected_rows: number;
+  /** Rows whose delay was computed from a date pair rather than read directly. */
+  derived_delays: number;
+  /** canonical field -> the header in the user's file that supplied it */
+  detected_columns: Record<string, string>;
+  unmapped_columns: string[];
+  warnings: string[];
+}
+
 export interface UploadAccepted {
   upload: Upload;
   analysis_id: string;
   task_id: string | null;
   poll_url: string;
+  ingest: IngestReport | null;
 }
 
 export interface Shipment {

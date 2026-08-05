@@ -8,6 +8,7 @@ LLM narration on top. If Claude is down, the dashboard still works.
 from __future__ import annotations
 
 import uuid
+from typing import IO
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,9 +25,10 @@ from app.schemas.analytics import (
     HistoricalPoint,
     HistoricalReport,
 )
+from app.schemas.upload import IngestReport
 from app.services.analytics import ShipmentFact, build_historical_report, build_report
 from app.services.claude import ClaudeService
-from app.services.csv_ingest import CsvIngestService, IngestResult
+from app.services.csv_ingest import CsvIngestService, IngestStats
 from app.utils import cache
 
 logger = get_logger(__name__)
@@ -55,10 +57,16 @@ class AnalysisService:
         *,
         user_id: uuid.UUID,
         filename: str,
-        content: bytes,
+        stream: IO[bytes],
+        size_bytes: int,
         label: str | None = None,
-    ) -> tuple[Upload, Analysis, IngestResult]:
-        """Parse, persist, and queue an analysis. Runs inside the request."""
+    ) -> tuple[Upload, Analysis, IngestReport]:
+        """Parse, persist, and queue an analysis. Runs inside the request.
+
+        Consumes the upload as a stream and flushes each batch, so peak memory
+        tracks the batch size rather than the file size — a 100 MB CSV costs
+        roughly what a 1 MB one does.
+        """
         if not filename.lower().endswith(".csv"):
             raise ValidationError("Only .csv files are supported.")
 
@@ -66,16 +74,23 @@ class AnalysisService:
             user_id=user_id,
             filename=filename[:512],
             label=label,
-            size_bytes=len(content),
+            size_bytes=size_bytes,
             status=UploadStatus.PARSING,
         )
         await self.uploads.add(upload)
 
-        result = self.ingest.parse(content, upload.id)
-        await self.shipments.bulk_insert(result.shipments)
+        stats = IngestStats()
+        for batch in self.ingest.stream_batches(stream, upload.id, stats):
+            self.session.add_all(batch)
+            # Flush per batch, then release just these rows from the identity
+            # map. Expunging the whole session would detach `upload` too and
+            # silently drop the row counts set below.
+            await self.session.flush()
+            for shipment in batch:
+                self.session.expunge(shipment)
 
-        upload.row_count = result.report.accepted_rows
-        upload.rejected_row_count = result.report.rejected_rows
+        upload.row_count = stats.accepted
+        upload.rejected_row_count = stats.rejected
         upload.status = UploadStatus.ANALYZING
 
         analysis = Analysis(upload_id=upload.id, status=AnalysisStatus.QUEUED)
@@ -85,10 +100,12 @@ class AnalysisService:
         logger.info(
             "upload_created",
             upload_id=str(upload.id),
-            rows=upload.row_count,
-            rejected=upload.rejected_row_count,
+            rows=stats.accepted,
+            rejected=stats.rejected,
+            derived_delays=stats.derived_delays,
+            truncated=stats.truncated,
         )
-        return upload, analysis, result
+        return upload, analysis, stats.to_report()
 
     # ── Deterministic analytics ────────────────────────────────────────
 

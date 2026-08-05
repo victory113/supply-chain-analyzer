@@ -61,9 +61,13 @@ class Settings(BaseSettings):
     anthropic_timeout_seconds: float = 120.0
 
     # ── Ingestion limits ───────────────────────────────────────────────
-    max_upload_bytes: int = 10 * 1024 * 1024  # 10 MB
-    max_rows_per_upload: int = 50_000
+    max_upload_bytes: int = 100 * 1024 * 1024  # 100 MB
+    max_rows_per_upload: int = 500_000
     max_rows_in_prompt: int = 200
+    # Rows held in memory at once. Peak usage tracks this, not the file size,
+    # so a 100 MB upload costs roughly the same as a 1 MB one. Larger batches
+    # mean fewer round trips but a higher ceiling.
+    ingest_batch_size: int = 5_000
 
     @field_validator("database_url", mode="before")
     @classmethod

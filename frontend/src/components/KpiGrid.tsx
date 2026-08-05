@@ -64,8 +64,14 @@ export function KpiGrid({ kpis }: { kpis: KpiSummary }) {
       />
       <KpiTile
         label="Avg lead time"
-        value={formatDays(kpis.avg_lead_time_days)}
-        hint={`Median delay ${formatDays(kpis.median_delay_days)}`}
+        // A file with no lead-time column yields 0.0, and "0.0d" reads as a
+        // measured value rather than an absent one. Say it's missing instead.
+        value={kpis.avg_lead_time_days > 0 ? formatDays(kpis.avg_lead_time_days) : '—'}
+        hint={
+          kpis.avg_lead_time_days > 0
+            ? `Median delay ${formatDays(kpis.median_delay_days)}`
+            : 'No lead time column in this file'
+        }
       />
     </div>
   );

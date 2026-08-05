@@ -54,17 +54,30 @@ describe('UploadDropzone', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/not a \.csv/);
   });
 
-  it('rejects a file over the 10 MB limit', () => {
+  it('accepts a large file that is still under the limit', () => {
     const onFile = vi.fn();
     render(<UploadDropzone onFile={onFile} />);
 
     dropFile(
       screen.getByRole('button', { name: /upload a csv file/i }),
-      csvFile('huge.csv', 11 * 1024 * 1024),
+      csvFile('big.csv', 80 * 1024 * 1024),
+    );
+
+    expect(onFile).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('rejects a file over the 100 MB limit', () => {
+    const onFile = vi.fn();
+    render(<UploadDropzone onFile={onFile} />);
+
+    dropFile(
+      screen.getByRole('button', { name: /upload a csv file/i }),
+      csvFile('huge.csv', 101 * 1024 * 1024),
     );
 
     expect(onFile).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent(/limit is 10 MB/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/limit is 100 MB/);
   });
 
   it('ignores a drop while disabled', () => {

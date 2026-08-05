@@ -6,6 +6,8 @@ Upload supply chain CSVs, get computed risk analytics and AI-generated explanati
 
 Create an account with any email, click **Try sample data**, and the dashboard fills in immediately. The AI risk assessment follows a few seconds later — that gap is the architecture, not lag.
 
+Bringing your own file? Any shipment or order CSV up to 100 MB works, without renaming a single column — [**what files can I upload?**](./DATA.md)
+
 > **First load takes 30–60 seconds.** The API runs on a free tier that sleeps when idle; it wakes on the first request. Reload if it errors once.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
@@ -279,7 +281,13 @@ A few decisions that took more thought than the code suggests:
 
 **Celery cannot be made to fail fast on publish.** Same session, worse symptom: with the broker down, uploads hung indefinitely. `retry=False` on `apply_async` disables *publish* retry, but kombu still runs its own connection loop (100 attempts by default), and turning that off globally would stop a live worker from reconnecting. So the API TCP-probes the broker itself before publishing and goes straight to the in-process fallback when nothing answers. Uploads went from hanging to 202-in-1.4s.
 
-**Ingestion is forgiving about cells, strict about rows.** Real exports are inconsistent, so columns are matched by alias (`"Unit Cost"`, `"unit_cost"`, `"unitprice"` all resolve), encodings fall back through UTF-8-BOM → cp1252, and an unparseable cell becomes null. A row is only rejected when it carries no identity at all — and rejection counts are surfaced rather than hidden.
+**Ingestion is forgiving about cells, strict about rows.** Real exports are inconsistent, so columns are matched by alias (`"Unit Cost"`, `"unit_cost"`, `"unitprice"` all resolve), the delimiter is sniffed (`, ; tab |`), encodings fall back through UTF-8-BOM → cp1252, and an unparseable cell becomes null. A row is rejected only when *every* recognised column is empty — an earlier rule demanded a vendor, reference or product specifically, and silently threw away entire public datasets whose identity column happened to be named something else. Rejection counts are surfaced, not hidden.
+
+**The most important column is usually the one that isn't there.** Almost no real export carries `delay_days`; it carries a promised date and an actual date and expects you to subtract. Without that derivation every shipment reads as on-time, the risk score comes out zero, and the dashboard looks *confidently* wrong — the worst failure mode available. Ingestion now derives delay from any scheduled/actual pair across 18 date formats, infers status from the derived delay, and dates each row from `shipped → actual → scheduled` so the trend chart has periods to plot. The count of derived values is reported back to the user, because a number the app invented should not be indistinguishable from one the file supplied.
+
+**100 MB uploads are a memory-shape problem, not a limit change.** Raising the cap meant nothing while the parser built one list of ORM objects for the whole file. Rows are now yielded in batches of 5,000; each batch is flushed and expunged from the identity map, so peak memory tracks the batch, not the file. (Expunging the *whole* session was the obvious version and was wrong — it detaches the `Upload` too, and the row counts written afterwards vanish without an error.)
+
+**Then it was a speed problem, and the cost was in an exception handler.** 300,000 rows took 84 seconds. The culprit was date parsing: matching one of 18 formats means raising and catching a `ValueError` for every format ahead of the right one, twice per row — about 3M exceptions. But a year of shipments contains only a few hundred *distinct* date strings, so an `lru_cache` on the format search collapses those 3M attempts to a few hundred. Same 300,000 rows: **14 seconds**. Worth knowing where the time actually was before optimising anything structural.
 
 **Chat retrieval is keyword-routed, not vector-based.** For a fixed, small set of metric families, routing a question to the relevant slices is cheaper and more predictable than embedding search — and the answer cites which slices it used.
 

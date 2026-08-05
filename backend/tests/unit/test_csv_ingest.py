@@ -121,7 +121,12 @@ class TestParsing:
         csv = b"vendor,product\nAcme,Widget\n"
         result = service.parse(csv, UPLOAD_ID)
         assert result.report.accepted_rows == 1
-        assert any("delay_days" in w for w in result.report.warnings)
+
+        warnings = " ".join(result.report.warnings).lower()
+        # The file parses, but the user is told which metrics will be empty:
+        # no delay source, and nothing to date the trend chart with.
+        assert "delay" in warnings
+        assert "date" in warnings
 
 
 class TestRejection:

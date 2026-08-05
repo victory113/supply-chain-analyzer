@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 from app.core.exceptions import UpstreamServiceError
 from app.core.security import hash_password
 from app.models.enums import AnalysisStatus, UploadStatus
@@ -29,13 +31,13 @@ class TestUploadPipeline:
         service = AnalysisService(session, claude=fake_claude)
 
         upload, analysis, result = await service.create_upload(
-            user_id=user.id, filename="data.csv", content=CSV
+            user_id=user.id, filename="data.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
 
         assert upload.row_count == 4
         assert upload.status == UploadStatus.ANALYZING
         assert analysis.status == AnalysisStatus.QUEUED
-        assert result.report.detected_columns["vendor"] == "vendor"
+        assert result.detected_columns["vendor"] == "vendor"
 
     async def test_non_csv_filename_is_rejected_before_any_work(self, session, fake_claude):
         import pytest
@@ -46,7 +48,9 @@ class TestUploadPipeline:
         service = AnalysisService(session, claude=fake_claude)
 
         with pytest.raises(ValidationError):
-            await service.create_upload(user_id=user.id, filename="data.txt", content=CSV)
+            await service.create_upload(
+                user_id=user.id, filename="data.txt", stream=io.BytesIO(CSV), size_bytes=len(CSV)
+            )
 
 
 class TestRunAnalysis:
@@ -54,7 +58,7 @@ class TestRunAnalysis:
         user = await make_user(session)
         service = AnalysisService(session, claude=fake_claude)
         _, analysis, _ = await service.create_upload(
-            user_id=user.id, filename="data.csv", content=CSV
+            user_id=user.id, filename="data.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
 
         result = await service.run_analysis(analysis.id)
@@ -75,7 +79,7 @@ class TestRunAnalysis:
         user = await make_user(session)
         service = AnalysisService(session, claude=fake_claude)
         _, analysis, _ = await service.create_upload(
-            user_id=user.id, filename="data.csv", content=CSV
+            user_id=user.id, filename="data.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
         await service.run_analysis(analysis.id)
 
@@ -94,7 +98,7 @@ class TestRunAnalysis:
         user = await make_user(session)
         service = AnalysisService(session, claude=BrokenClaude())
         _, analysis, _ = await service.create_upload(
-            user_id=user.id, filename="data.csv", content=CSV
+            user_id=user.id, filename="data.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
 
         result = await service.run_analysis(analysis.id)
@@ -114,7 +118,7 @@ class TestAnalyticsAndHistory:
         user = await make_user(session)
         service = AnalysisService(session, claude=fake_claude)
         upload, _, _ = await service.create_upload(
-            user_id=user.id, filename="data.csv", content=CSV
+            user_id=user.id, filename="data.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
 
         report = await service.build_report(upload.id, use_cache=False)
@@ -127,7 +131,7 @@ class TestAnalyticsAndHistory:
         user = await make_user(session)
         service = AnalysisService(session, claude=fake_claude)
         _, analysis, _ = await service.create_upload(
-            user_id=user.id, filename="one.csv", content=CSV
+            user_id=user.id, filename="one.csv", stream=io.BytesIO(CSV), size_bytes=len(CSV)
         )
         await service.run_analysis(analysis.id)
 
@@ -140,7 +144,7 @@ class TestAnalyticsAndHistory:
 
         for name in ("q1.csv", "q2.csv"):
             _, analysis, _ = await service.create_upload(
-                user_id=user.id, filename=name, content=CSV
+                user_id=user.id, filename=name, stream=io.BytesIO(CSV), size_bytes=len(CSV)
             )
             await service.run_analysis(analysis.id)
 

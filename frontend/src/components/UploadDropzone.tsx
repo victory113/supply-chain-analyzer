@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 
-const MAX_BYTES = 10 * 1024 * 1024; // must match the backend's max_upload_bytes
+const MAX_MB = 100; // must match the backend's max_upload_bytes
+const MAX_BYTES = MAX_MB * 1024 * 1024;
 
 interface UploadDropzoneProps {
   onFile: (file: File) => void;
@@ -28,7 +29,7 @@ export function UploadDropzone({ onFile, disabled = false }: UploadDropzoneProps
       }
       if (file.size > MAX_BYTES) {
         setError(
-          `That file is ${(file.size / 1_048_576).toFixed(1)} MB; the limit is 10 MB.`,
+          `That file is ${(file.size / 1_048_576).toFixed(1)} MB; the limit is ${MAX_MB} MB.`,
         );
         return;
       }
@@ -80,7 +81,7 @@ export function UploadDropzone({ onFile, disabled = false }: UploadDropzoneProps
           {disabled ? 'Uploading…' : 'Drop a CSV here, or click to browse'}
         </div>
         <div className="dropzone-hint">
-          Shipment exports up to 10 MB · columns are matched automatically
+          Shipment exports up to {MAX_MB} MB · columns are matched automatically
         </div>
       </div>
 

@@ -48,7 +48,7 @@ export function DashboardPage() {
     mutationFn: (file: File) => uploadsApi.create(file),
     onSuccess: (accepted) => {
       void queryClient.invalidateQueries({ queryKey: ['uploads'] });
-      navigate(`/uploads/${accepted.upload.id}`);
+      navigate(`/uploads/${accepted.upload.id}`, { state: { ingest: accepted.ingest } });
     },
   });
 

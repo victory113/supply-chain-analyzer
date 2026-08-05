@@ -30,6 +30,9 @@ build/
 # Personal working notes — kept locally, not published
 RUNBOOK.md
 
+# Local editor/agent tooling
+.claude/
+
 # Editors & OS
 .DS_Store
 .idea/

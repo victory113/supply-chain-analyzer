@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 
 import { ApiError } from '@/api/client';
 import { analysesApi, analyticsApi, queryKeys, uploadsApi } from '@/api/endpoints';
+import type { IngestReport } from '@/api/types';
 import { AnalysisProgressBanner } from '@/components/AnalysisProgress';
+import { IngestSummary } from '@/components/IngestSummary';
 import { KpiGrid } from '@/components/KpiGrid';
 import { RiskList } from '@/components/RiskList';
 import { CountryExposure } from '@/components/charts/CountryExposure';
@@ -27,6 +29,10 @@ import {
 export function UploadDetailPage() {
   const { uploadId = '' } = useParams<{ uploadId: string }>();
   const queryClient = useQueryClient();
+
+  // Present only when we arrived here straight from an upload; absent on a
+  // reload or a visit from the list, which is fine — it's a one-time receipt.
+  const { ingest } = (useLocation().state ?? {}) as { ingest?: IngestReport | null };
 
   const uploadQuery = useQuery({
     queryKey: queryKeys.upload(uploadId),
@@ -55,7 +61,12 @@ export function UploadDetailPage() {
   const loadedStatus = analysisQuery.data?.status;
   const alreadyTerminal = loadedStatus === 'completed' || loadedStatus === 'failed';
 
-  const progress = useAnalysisStatus({ analysisId, enabled: !alreadyTerminal });
+  const progress = useAnalysisStatus({
+    analysisId,
+    enabled: !alreadyTerminal,
+    knownStatus: loadedStatus ?? null,
+    knownError: analysisQuery.data?.error_message ?? null,
+  });
 
   // Once polling reports a terminal state, refetch the full record so the
   // summary and risks appear. Done in an effect, not during render — an
@@ -116,6 +127,8 @@ export function UploadDetailPage() {
           )}
         </div>
       </header>
+
+      {ingest && <IngestSummary report={ingest} />}
 
       <AnalysisProgressBanner progress={progress} />
 
