@@ -35,6 +35,17 @@ describe('formatCurrency', () => {
 
   it('leaves small amounts unabbreviated', () => {
     expect(formatCurrency(940)).toBe('$940');
+    expect(formatCurrency(150)).toBe('$150');
+  });
+
+  it('keeps cents on sub-dollar figures', () => {
+    // Freight per unit is routinely under a dollar; "$0" would read as free.
+    expect(formatCurrency(0.41)).toBe('$0.41');
+    expect(formatCurrency(1.86)).toBe('$1.86');
+  });
+
+  it('still shows a true zero as zero', () => {
+    expect(formatCurrency(0)).toBe('$0');
   });
 
   it('handles negatives without breaking the threshold check', () => {

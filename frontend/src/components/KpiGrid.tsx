@@ -58,9 +58,19 @@ export function KpiGrid({ kpis }: { kpis: KpiSummary }) {
       />
       <KpiTile
         label="Value at risk"
-        value={formatCurrency(kpis.value_at_risk)}
-        hint={`of ${formatCurrency(kpis.total_value)} total`}
-        tone={kpis.value_at_risk > kpis.total_value * 0.3 ? 'high' : undefined}
+        // No priced rows means no value to put at risk. "$0 of $0" would read
+        // as "these shipments are worthless" rather than "we weren't told".
+        value={kpis.total_value > 0 ? formatCurrency(kpis.value_at_risk) : '—'}
+        hint={
+          kpis.total_value > 0
+            ? `of ${formatCurrency(kpis.total_value)} total`
+            : 'No quantity or price column in this file'
+        }
+        tone={
+          kpis.total_value > 0 && kpis.value_at_risk > kpis.total_value * 0.3
+            ? 'high'
+            : undefined
+        }
       />
       <KpiTile
         label="Avg lead time"

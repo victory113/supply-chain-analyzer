@@ -73,6 +73,54 @@ class ShipmentStatus(StrEnum):
         return aliases.get(normalized, cls.UNKNOWN)
 
 
+class TransportMode(StrEnum):
+    """How the goods moved. Drives mode-vs-mode performance and CO2 factors."""
+
+    AIR = "air"
+    OCEAN = "ocean"
+    ROAD = "road"
+    RAIL = "rail"
+    PARCEL = "parcel"
+    MULTIMODAL = "multimodal"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def parse(cls, raw: str | None) -> TransportMode:
+        if not raw:
+            return cls.UNKNOWN
+        normalized = raw.strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "air": cls.AIR,
+            "air_freight": cls.AIR,
+            "airfreight": cls.AIR,
+            "flight": cls.AIR,
+            "plane": cls.AIR,
+            "ocean": cls.OCEAN,
+            "sea": cls.OCEAN,
+            "sea_freight": cls.OCEAN,
+            "vessel": cls.OCEAN,
+            "ship": cls.OCEAN,
+            "maritime": cls.OCEAN,
+            "fcl": cls.OCEAN,
+            "lcl": cls.OCEAN,
+            "road": cls.ROAD,
+            "truck": cls.ROAD,
+            "trucking": cls.ROAD,
+            "ltl": cls.ROAD,
+            "ftl": cls.ROAD,
+            "ground": cls.ROAD,
+            "rail": cls.RAIL,
+            "train": cls.RAIL,
+            "intermodal": cls.MULTIMODAL,
+            "multimodal": cls.MULTIMODAL,
+            "parcel": cls.PARCEL,
+            "courier": cls.PARCEL,
+            "express": cls.PARCEL,
+            "small_parcel": cls.PARCEL,
+        }
+        return aliases.get(normalized, cls.UNKNOWN)
+
+
 class RiskLevel(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"

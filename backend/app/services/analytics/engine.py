@@ -7,7 +7,7 @@ computes any figure the user sees.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from app.schemas.analytics import (
     AnalyticsReport,
@@ -15,8 +15,20 @@ from app.schemas.analytics import (
     HistoricalReport,
 )
 from app.services.analytics.countries import score_countries
+from app.services.analytics.dimensions import (
+    score_carriers,
+    score_categories,
+    score_lanes,
+    score_service_levels,
+    score_transport_modes,
+)
 from app.services.analytics.facts import ShipmentFact
 from app.services.analytics.kpis import compute_kpis
+from app.services.analytics.operations import (
+    build_cost_summary,
+    build_emissions_summary,
+    build_quality_summary,
+)
 from app.services.analytics.risk import compute_risk
 from app.services.analytics.stats import mean, round_to
 from app.services.analytics.trends import build_trend
@@ -33,6 +45,12 @@ STRONG_VENDOR_HEALTH = 85.0
 
 
 def build_report(upload_id: str, facts: Sequence[ShipmentFact]) -> AnalyticsReport:
+    """Compute every metric the uploaded columns can support — and only those.
+
+    The optional sections are the reason this app can accept an export from any
+    system: a file with a carrier column gets carrier analysis, one without
+    simply doesn't, and neither case requires the caller to know in advance.
+    """
     kpis = compute_kpis(facts)
     return AnalyticsReport(
         upload_id=upload_id,
@@ -44,7 +62,44 @@ def build_report(upload_id: str, facts: Sequence[ShipmentFact]) -> AnalyticsRepo
         trend=build_trend(facts),
         risk=compute_risk(facts, kpis),
         healthy_signals=find_healthy_signals(facts),
+        carriers=score_carriers(facts),
+        transport_modes=score_transport_modes(facts),
+        service_levels=score_service_levels(facts),
+        categories=score_categories(facts),
+        lanes=score_lanes(facts),
+        cost=build_cost_summary(facts),
+        quality=build_quality_summary(facts),
+        emissions=build_emissions_summary(facts),
+        available_dimensions=describe_coverage(facts),
     )
+
+
+# Canonical field -> how to tell whether a row populated it. Drives the
+# "what else could this file have told us?" hint in the UI.
+_COVERAGE_PROBES: dict[str, Callable[[ShipmentFact], bool]] = {
+    "carrier": lambda f: f.carrier is not None,
+    "transport_mode": lambda f: f.transport_mode is not None,
+    "service_level": lambda f: f.service_level is not None,
+    "category": lambda f: f.category is not None,
+    "freight_cost": lambda f: f.freight_cost is not None,
+    "weight": lambda f: f.weight_kg is not None,
+    "co2": lambda f: f.co2_kg is not None,
+    "damage": lambda f: f.damaged is not None,
+    "returns": lambda f: f.returned is not None,
+    "fill_rate": lambda f: f.quantity_delivered is not None,
+}
+
+
+def describe_coverage(facts: Sequence[ShipmentFact], *, min_share: float = 0.2) -> list[str]:
+    """Optional dimensions this upload actually carries, in a stable order."""
+    if not facts:
+        return []
+    threshold = len(facts) * min_share
+    return [
+        name
+        for name, probe in _COVERAGE_PROBES.items()
+        if sum(1 for f in facts if probe(f)) >= threshold
+    ]
 
 
 def find_healthy_signals(facts: Sequence[ShipmentFact]) -> list[str]:

@@ -79,7 +79,72 @@ class RiskBreakdown(BaseModel):
     weights: dict[str, float]
 
 
+class DimensionScore(BaseModel):
+    """Performance for one value of a dimension — a carrier, a mode, a lane.
+
+    One shape serves all of them so the frontend can render any breakdown with
+    a single component instead of one per dimension.
+    """
+
+    label: str
+    shipment_count: int
+    share_pct: float
+    late_count: int
+    late_pct: float
+    avg_delay_days: float
+    # None when the file carried no transit/freight data for this group, which
+    # is not the same as zero.
+    avg_transit_days: float | None = None
+    total_value: float
+    avg_freight_cost: float | None = None
+
+
+class CostSummary(BaseModel):
+    """Freight economics. Present only when the upload carried cost columns."""
+
+    coverage_pct: float = Field(description="Share of rows that carried a freight cost")
+    total_freight_cost: float
+    avg_freight_cost: float
+    freight_per_unit: float | None = None
+    freight_per_kg: float | None = None
+    freight_pct_of_goods: float | None = Field(
+        default=None, description="Freight spend as a share of goods value"
+    )
+    total_landed_cost: float | None = None
+    freight_spent_on_late_shipments: float
+
+
+class QualitySummary(BaseModel):
+    """Damage, returns, fill rate. Each metric independently optional."""
+
+    damage_rate_pct: float | None = None
+    damaged_count: int | None = None
+    return_rate_pct: float | None = None
+    returned_count: int | None = None
+    avg_fill_rate_pct: float | None = None
+    perfect_order_rate_pct: float = Field(
+        description="On time, undamaged, not returned, fully filled"
+    )
+    coverage_pct: float
+
+
+class EmissionsSummary(BaseModel):
+    """CO2e, read from the file or estimated from mode/distance/weight."""
+
+    coverage_pct: float
+    total_co2_kg: float
+    avg_co2_per_shipment_kg: float
+    co2_by_mode_kg: dict[str, float]
+
+
 class AnalyticsReport(BaseModel):
+    """The full deterministic report.
+
+    Sections below `healthy_signals` are all optional and are omitted entirely
+    when the upload lacked the columns to compute them. An absent section means
+    "this file couldn't answer that question" — never "the answer is zero".
+    """
+
     upload_id: str
     kpis: KpiSummary
     vendors: list[VendorScore]
@@ -87,6 +152,22 @@ class AnalyticsReport(BaseModel):
     trend: TrendAnalysis
     risk: RiskBreakdown
     healthy_signals: list[str]
+
+    # Optional dimensions
+    carriers: list[DimensionScore] = []
+    transport_modes: list[DimensionScore] = []
+    service_levels: list[DimensionScore] = []
+    categories: list[DimensionScore] = []
+    lanes: list[DimensionScore] = []
+
+    # Optional summaries
+    cost: CostSummary | None = None
+    quality: QualitySummary | None = None
+    emissions: EmissionsSummary | None = None
+
+    # Which canonical fields this upload actually populated, so the UI can
+    # explain what's missing instead of silently showing less.
+    available_dimensions: list[str] = []
 
 
 class HistoricalPoint(BaseModel):

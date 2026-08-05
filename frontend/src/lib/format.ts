@@ -68,6 +68,9 @@ export function formatCurrency(value: number | null | undefined): string {
   if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
   if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (abs >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  // Per-unit and per-kg figures are routinely under a dollar, and rounding
+  // those to whole dollars renders a real $0.41 as "$0" — which reads as free.
+  if (abs > 0 && abs < 100) return `$${value.toFixed(2)}`;
   return `$${value.toFixed(0)}`;
 }
 

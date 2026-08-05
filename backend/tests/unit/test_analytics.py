@@ -18,6 +18,40 @@ from app.services.analytics.trends import build_trend
 from tests.conftest import make_fact
 
 
+class TestRiskWithMissingComponents:
+    """A file that carries less data must not therefore look safer."""
+
+    def test_an_unpriced_file_still_scores_across_the_full_range(self):
+        # Same delivery performance, but no quantity or price columns.
+        priced = [make_fact(delay=20) for _ in range(10)]
+        unpriced = [make_fact(delay=20, quantity=0, unit_cost=0.0) for _ in range(10)]
+
+        priced_risk = compute_risk(priced, compute_kpis(priced))
+        unpriced_risk = compute_risk(unpriced, compute_kpis(unpriced))
+
+        # Before the weights were redistributed, the unpriced file scored a
+        # flat 20 points lower purely for lacking a column.
+        assert unpriced_risk.score == pytest.approx(priced_risk.score, abs=1.0)
+
+    def test_value_at_risk_is_omitted_rather_than_zeroed(self):
+        unpriced = [make_fact(delay=5, quantity=0, unit_cost=0.0) for _ in range(5)]
+        breakdown = compute_risk(unpriced, compute_kpis(unpriced))
+
+        assert "value_at_risk" not in breakdown.components
+        assert "value_at_risk" not in breakdown.weights
+
+    def test_remaining_weights_still_sum_to_one(self):
+        unpriced = [make_fact(delay=5, quantity=0, unit_cost=0.0) for _ in range(5)]
+        breakdown = compute_risk(unpriced, compute_kpis(unpriced))
+        assert sum(breakdown.weights.values()) == pytest.approx(1.0, abs=0.001)
+
+    def test_a_priced_file_keeps_all_five_components(self):
+        priced = [make_fact(delay=5) for _ in range(5)]
+        breakdown = compute_risk(priced, compute_kpis(priced))
+        assert "value_at_risk" in breakdown.components
+        assert sum(breakdown.weights.values()) == pytest.approx(1.0, abs=0.001)
+
+
 class TestStats:
     def test_safe_div_returns_default_on_zero_denominator(self):
         assert safe_div(10, 0) == 0.0

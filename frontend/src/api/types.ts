@@ -188,6 +188,48 @@ export interface RiskBreakdown {
   weights: Record<string, number>;
 }
 
+/** One value of a breakdown dimension — a carrier, a mode, a lane. */
+export interface DimensionScore {
+  label: string;
+  shipment_count: number;
+  share_pct: number;
+  late_count: number;
+  late_pct: number;
+  avg_delay_days: number;
+  /** null when the file carried no transit data for this group — not zero. */
+  avg_transit_days: number | null;
+  total_value: number;
+  avg_freight_cost: number | null;
+}
+
+export interface CostSummary {
+  coverage_pct: number;
+  total_freight_cost: number;
+  avg_freight_cost: number;
+  freight_per_unit: number | null;
+  freight_per_kg: number | null;
+  freight_pct_of_goods: number | null;
+  total_landed_cost: number | null;
+  freight_spent_on_late_shipments: number;
+}
+
+export interface QualitySummary {
+  damage_rate_pct: number | null;
+  damaged_count: number | null;
+  return_rate_pct: number | null;
+  returned_count: number | null;
+  avg_fill_rate_pct: number | null;
+  perfect_order_rate_pct: number;
+  coverage_pct: number;
+}
+
+export interface EmissionsSummary {
+  coverage_pct: number;
+  total_co2_kg: number;
+  avg_co2_per_shipment_kg: number;
+  co2_by_mode_kg: Record<string, number>;
+}
+
 export interface AnalyticsReport {
   upload_id: string;
   kpis: KpiSummary;
@@ -196,6 +238,20 @@ export interface AnalyticsReport {
   trend: TrendAnalysis;
   risk: RiskBreakdown;
   healthy_signals: string[];
+
+  /**
+   * Optional sections. Empty or null means the upload lacked the columns to
+   * compute them — render nothing, never render a zero.
+   */
+  carriers: DimensionScore[];
+  transport_modes: DimensionScore[];
+  service_levels: DimensionScore[];
+  categories: DimensionScore[];
+  lanes: DimensionScore[];
+  cost: CostSummary | null;
+  quality: QualitySummary | null;
+  emissions: EmissionsSummary | null;
+  available_dimensions: string[];
 }
 
 export interface HistoricalPoint {

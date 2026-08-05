@@ -6,7 +6,9 @@ import { ApiError } from '@/api/client';
 import { analysesApi, analyticsApi, queryKeys, uploadsApi } from '@/api/endpoints';
 import type { IngestReport } from '@/api/types';
 import { AnalysisProgressBanner } from '@/components/AnalysisProgress';
+import { DimensionTable } from '@/components/DimensionTable';
 import { IngestSummary } from '@/components/IngestSummary';
+import { CostPanel, EmissionsPanel, QualityPanel } from '@/components/OperationsPanels';
 import { KpiGrid } from '@/components/KpiGrid';
 import { RiskList } from '@/components/RiskList';
 import { CountryExposure } from '@/components/charts/CountryExposure';
@@ -144,7 +146,10 @@ export function UploadDetailPage() {
           <div className="grid grid-2">
             <Card
               title="Composite risk score"
-              hint="Computed in Python — weights are fixed and auditable"
+              // Not "fixed": a component the file can't support is dropped and
+              // its weight redistributed, so the weights shown are the ones
+              // actually used for this upload.
+              hint="Computed in Python — every weight is shown below"
               action={<RiskBadge level={report.risk.level} />}
             >
               <RiskGauge risk={report.risk} />
@@ -185,6 +190,46 @@ export function UploadDetailPage() {
               <CountryExposure countries={report.countries} />
             </Card>
           </div>
+
+          {/* Everything below renders only if the upload carried the columns
+              for it. A file with no carrier column simply has no carrier
+              section — the alternative, a card full of zeros, would read as a
+              finding rather than an absence. */}
+          <CostPanel cost={report.cost} />
+          <QualityPanel quality={report.quality} />
+
+          <DimensionTable
+            title="Carrier performance"
+            hint="Who is actually delivering on time"
+            label="Carrier"
+            rows={report.carriers}
+          />
+          <DimensionTable
+            title="Transport mode"
+            hint="Air vs ocean vs road, on the same terms"
+            label="Mode"
+            rows={report.transport_modes}
+          />
+          <DimensionTable
+            title="Service level"
+            hint="Is the premium service earning its premium?"
+            label="Service"
+            rows={report.service_levels}
+          />
+          <DimensionTable
+            title="Product categories"
+            hint="Which goods run late most often"
+            label="Category"
+            rows={report.categories}
+          />
+          <DimensionTable
+            title="Trade lanes"
+            hint="Origin to destination, worst first"
+            label="Lane"
+            rows={report.lanes}
+          />
+
+          <EmissionsPanel emissions={report.emissions} />
 
           {report.healthy_signals.length > 0 && (
             <Card title="What's working" hint="Computed, not model-generated">

@@ -26,29 +26,30 @@ def service() -> CsvIngestService:
 
 class TestColumnMapping:
     def test_maps_canonical_headers(self):
-        mapping, unmapped = map_columns(["vendor", "delay_days", "status"])
+        mapping, unmapped, _ = map_columns(["vendor", "delay_days", "status"])
         assert mapping["vendor"] == "vendor"
         assert mapping["delay_days"] == "delay_days"
         assert unmapped == []
 
     def test_matches_regardless_of_case_spacing_and_punctuation(self):
-        mapping, _ = map_columns(["Unit Cost", "LEAD-TIME-DAYS", "Origin Country"])
+        mapping, _, _ = map_columns(["Unit Cost", "LEAD-TIME-DAYS", "Origin Country"])
         assert mapping["unit_cost"] == "Unit Cost"
         assert mapping["lead_time_days"] == "LEAD-TIME-DAYS"
         assert mapping["origin_country"] == "Origin Country"
 
     def test_accepts_common_synonyms(self):
-        mapping, _ = map_columns(["Supplier", "Days Late", "SKU"])
+        mapping, _, _ = map_columns(["Supplier", "Days Late", "SKU"])
         assert mapping["vendor"] == "Supplier"
         assert mapping["delay_days"] == "Days Late"
-        assert mapping["product"] == "SKU"
+        # SKU has its own canonical field now that the model is wider.
+        assert mapping["sku"] == "SKU"
 
     def test_reports_columns_it_could_not_place(self):
-        _, unmapped = map_columns(["vendor", "internal_notes", "approver_initials"])
+        _, unmapped, _ = map_columns(["vendor", "internal_notes", "approver_initials"])
         assert set(unmapped) == {"internal_notes", "approver_initials"}
 
     def test_one_header_is_not_claimed_by_two_fields(self):
-        mapping, _ = map_columns(["id", "shipment_id"])
+        mapping, _, _ = map_columns(["id", "shipment_id"])
         assert len(set(mapping.values())) == len(mapping.values())
 
 

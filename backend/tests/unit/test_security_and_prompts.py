@@ -95,6 +95,14 @@ class TestPrompts:
         assert "shipment_ref" not in brief
         assert "Dallas TX" not in brief
 
+    def test_lane_labels_are_withheld_from_the_model(self, report):
+        """Destinations are the likeliest place for a customer name or street
+        address to appear, so lane analysis stays on our side of the wire even
+        though the lanes themselves are computed and shown in the UI."""
+        brief = build_metrics_brief(report)
+        assert "Dallas TX" not in brief
+        assert all(lane.label not in brief for lane in report.lanes)
+
 
 class TestChatIntentRouting:
     def test_vendor_question_selects_the_vendor_section(self):

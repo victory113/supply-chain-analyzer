@@ -33,7 +33,10 @@ class IngestReport(BaseModel):
     derived_delays: int = 0
     detected_columns: dict[str, str]
     unmapped_columns: list[str]
-    warnings: list[str]
+    # Headers matched by similarity rather than a known alias, with confidence.
+    # Shown separately so a guess is never presented as a recognised column.
+    fuzzy_columns: dict[str, float] = {}
+    warnings: list[str] = []
 
 
 class UploadAccepted(BaseModel):

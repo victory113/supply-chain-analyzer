@@ -22,13 +22,14 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import IO
 
 from app.core.config import settings
 from app.core.exceptions import PayloadTooLargeError, ValidationError
 from app.core.logging import get_logger
-from app.models.enums import ShipmentStatus
+from app.models.enums import ShipmentStatus, TransportMode
 from app.models.shipment import Shipment
 from app.schemas.upload import IngestReport
 
@@ -38,6 +39,11 @@ logger = get_logger(__name__)
 # stripping every non-alphanumeric character, so "Unit Cost", "unit_cost" and
 # "UNIT-COST" all collapse to the same key.
 COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    # NOTE ON ORDERING: a header is claimed by the first field that matches, so
+    # broad fields must not list aliases that a more specific field owns. That
+    # is why "carrier" is absent from `vendor` and "sku"/"brand"/"category" are
+    # absent from `product` — those columns now have fields of their own, and
+    # leaving them here would quietly starve the new analytics.
     "shipment_ref": (
         "shipmentid",
         "shipment",
@@ -48,12 +54,8 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "po",
         "orderid",
         "ordernum",
-        "trackingnumber",
-        "tracking",
         "asnnumber",
         "poso",
-        "ponumber",
-        "sonumber",
         "recordid",
         "lineitem",
         "lineitemid",
@@ -66,7 +68,6 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "manufacturer",
         "manufacturingsite",
         "shipper",
-        "carrier",
         "seller",
         "sellerid",
         "supplierid",
@@ -76,19 +77,14 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "product": (
         "product",
         "item",
-        "sku",
         "material",
         "description",
         "productname",
         "itemdescription",
-        "productcategory",
-        "categoryname",
         "molecule",
-        "producttype",
         "commodity",
         "productid",
         "itemname",
-        "brand",
     ),
     "origin_country": (
         "origincountry",
@@ -110,11 +106,7 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "shipto",
         "deliverylocation",
         "to",
-        "destinationcountry",
-        "customercountry",
         "customerstate",
-        "customercity",
-        "deliverycountry",
         "consignee",
         "destinationport",
         "region",
@@ -139,7 +131,6 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "price",
         "unitprice",
         "costperunit",
-        "pack_price",
         "packprice",
         "lineitemvalue",
         "orderitemproductprice",
@@ -242,7 +233,266 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "extractdate",
         "modifiedat",
     ),
+    # ── Identifiers ───────────────────────────────────────────────────
+    "order_ref": (
+        "orderref",
+        "salesorder",
+        "salesordernumber",
+        "sonumber",
+        "purchaseorder",
+        "purchaseordernumber",
+        "customerordernumber",
+        "orderreference",
+    ),
+    "tracking_number": (
+        "trackingnumber",
+        "trackingid",
+        "trackingref",
+        "waybill",
+        "waybillnumber",
+        "airwaybill",
+        "awb",
+        "billoflading",
+        "bol",
+        "pronumber",
+        "consignmentnumber",
+    ),
+    "customer_ref": (
+        "customerid",
+        "customerref",
+        "customernumber",
+        "accountid",
+        "accountnumber",
+        "clientid",
+    ),
+    # ── Parties ───────────────────────────────────────────────────────
+    "carrier": (
+        "carrier",
+        "carriername",
+        "logisticsprovider",
+        "freightforwarder",
+        "forwarder",
+        "transporter",
+        "haulier",
+        "trucker",
+        "shippingline",
+        "courier",
+        "carriercode",
+        "3pl",
+    ),
+    "customer": (
+        "customer",
+        "customername",
+        "client",
+        "clientname",
+        "consigneename",
+        "buyer",
+        "shiptoname",
+    ),
+    "service_level": (
+        "servicelevel",
+        "service",
+        "servicetype",
+        "shippingmethod",
+        "shipmethod",
+        "deliveryservice",
+        "shippingservice",
+        "servicecode",
+    ),
+    # ── Product ───────────────────────────────────────────────────────
+    "sku": ("sku", "skucode", "skuid", "itemcode", "materialnumber", "partnumber", "itemnumber"),
+    "category": (
+        "category",
+        "productcategory",
+        "categoryname",
+        "itemcategory",
+        "productline",
+        "commoditygroup",
+        "producttype",
+        "segment",
+    ),
+    "brand": ("brand", "brandname", "make", "label"),
+    "quantity_delivered": (
+        "quantitydelivered",
+        "deliveredquantity",
+        "qtydelivered",
+        "receivedquantity",
+        "quantityreceived",
+        "qtyreceived",
+        "quantityfulfilled",
+        "shippedquantity",
+    ),
+    "currency": ("currency", "currencycode", "curr", "ccy"),
+    "weight_kg": (
+        "weight",
+        "weightkg",
+        "grossweight",
+        "netweight",
+        "totalweight",
+        "shipmentweight",
+        "chargeableweight",
+        "weightkilograms",
+    ),
+    "hazardous": (
+        "hazardous",
+        "hazmat",
+        "hazardousmaterial",
+        "dangerousgoods",
+        "isdangerous",
+        "dg",
+    ),
+    "temperature_controlled": (
+        "temperaturecontrolled",
+        "refrigerated",
+        "reefer",
+        "coldchain",
+        "tempcontrolled",
+        "chilled",
+    ),
+    # ── Geography ─────────────────────────────────────────────────────
+    "origin_city": ("origincity", "shipfromcity", "sourcecity", "pickupcity", "departurecity"),
+    "destination_country": (
+        "destinationcountry",
+        "deliverycountry",
+        "shiptocountry",
+        "consigneecountry",
+        "receivingcountry",
+    ),
+    "destination_city": (
+        "destinationcity",
+        "deliverycity",
+        "shiptocity",
+        "consigneecity",
+        "arrivalcity",
+    ),
+    "warehouse": (
+        "warehouse",
+        "warehouseid",
+        "warehousename",
+        "distributioncenter",
+        "distributioncentre",
+        "dc",
+        "facility",
+        "fulfilmentcenter",
+        "fulfillmentcenter",
+        "site",
+    ),
+    # ── Transport ─────────────────────────────────────────────────────
+    "transport_mode": (
+        "transportmode",
+        "mode",
+        "modeoftransport",
+        "shipmentmode",
+        "shippingmode",
+        "transportationmode",
+        "shipmenttype",
+        "freightmode",
+        "modeofshipment",
+    ),
+    "container_ref": ("container", "containernumber", "containerid", "containerref", "equipmentid"),
+    "vehicle_ref": (
+        "vehicleid",
+        "vehicle",
+        "trucknumber",
+        "truckid",
+        "flightnumber",
+        "vesselname",
+        "vessel",
+        "voyage",
+        "trailernumber",
+    ),
+    "route_ref": ("routeid", "route", "routecode", "lane", "lanecode", "laneid"),
+    "package_count": (
+        "packages",
+        "packagecount",
+        "numberofpackages",
+        "cartons",
+        "cartoncount",
+        "pallets",
+        "palletcount",
+        "pieces",
+        "piececount",
+        "numpackages",
+    ),
+    "distance_km": (
+        "distance",
+        "distancekm",
+        "distancekilometers",
+        "distancetravelled",
+        "distancemiles",
+        "shippingdistance",
+        "routedistance",
+    ),
+    # ── Timing ────────────────────────────────────────────────────────
+    "transit_days": (
+        "transittime",
+        "transitdaysactual",
+        "actualtransitdays",
+        "daysintransit",
+        "daysforshippingreal",
+        "actualshippingdays",
+        "realshippingdays",
+    ),
+    "priority": ("priority", "orderpriority", "shipmentpriority", "urgency", "prioritylevel"),
+    # ── Money ─────────────────────────────────────────────────────────
+    "freight_cost": (
+        "freightcost",
+        "freight",
+        "shippingcost",
+        "freightcharge",
+        "transportcost",
+        "carriercost",
+        "shippingcharges",
+        "freightamount",
+        "haulagecost",
+    ),
+    "insurance_cost": ("insurancecost", "insurance", "insuranceamount", "insurancecharge"),
+    "customs_duty": (
+        "customsduty",
+        "duty",
+        "dutyamount",
+        "tariff",
+        "tariffamount",
+        "importduty",
+        "customscharges",
+    ),
+    "total_cost": (
+        "totalcost",
+        "totalshipmentcost",
+        "landedcost",
+        "totallandedcost",
+        "invoiceamount",
+        "totalamount",
+        "totalspend",
+        "grandtotal",
+    ),
+    # ── Quality ───────────────────────────────────────────────────────
+    "damaged": ("damaged", "damage", "isdamaged", "damagedflag", "damagereported"),
+    "returned": ("returned", "isreturned", "returnflag", "rma", "returnrequested"),
+    # ── Customs ───────────────────────────────────────────────────────
+    "incoterms": ("incoterms", "incoterm", "termsofdelivery", "deliveryterms", "tradeterms"),
+    "hs_code": ("hscode", "harmonizedcode", "harmonisedcode", "tariffcode", "commoditycode"),
+    # ── Sustainability ────────────────────────────────────────────────
+    "co2_kg": (
+        "co2",
+        "co2kg",
+        "co2emissions",
+        "carbonemissions",
+        "emissions",
+        "carbonfootprint",
+        "ghgemissions",
+        "co2e",
+    ),
 }
+
+# Values that read as "yes" in a boolean-ish column. Anything else non-null is
+# treated as false; a blank stays None so "we don't know" survives.
+TRUE_TOKENS = frozenset({"true", "yes", "y", "1", "t", "damaged", "returned"})
+FALSE_TOKENS = frozenset({"false", "no", "n", "0", "f", "none", "ok", "undamaged"})
+
+# Below this ratio a near-miss header is more likely coincidence than a match.
+# 0.87 accepts "Suppler Name" -> vendor and rejects "Supply Region" -> vendor.
+FUZZY_CUTOFF = 0.87
 
 # Ordered most-specific first: a bare "%Y-%m-%d" would happily swallow the date
 # part of an ISO timestamp and silently discard the time.
@@ -281,8 +531,27 @@ def _normalize_header(header: str) -> str:
     return "".join(ch for ch in header.lower() if ch.isalnum())
 
 
-def map_columns(headers: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Return (canonical_field -> original_header, unmapped_headers)."""
+def map_columns(
+    headers: list[str], *, fuzzy: bool = True
+) -> tuple[dict[str, str], list[str], dict[str, float]]:
+    """Map a file's headers onto canonical field names.
+
+    Two passes, in order of confidence:
+
+    1. **Exact alias.** ``"Unit Cost"``, ``"unit_cost"`` and ``"UNITCOST"`` all
+       normalise to the same key and match outright.
+    2. **Fuzzy.** Anything still unmapped is compared against every alias by
+       edit-distance ratio. This is what catches the long tail of one-off
+       header names — ``"Suppler Name"`` (a typo in someone's ERP export),
+       ``"Delivery Ctry"``, ``"Frght Cost"`` — without needing an alias entry
+       for each. The cutoff is deliberately high; a wrong mapping is far worse
+       than an unmapped column, because a wrong one silently feeds the wrong
+       numbers into the analytics.
+
+    Returns ``(mapping, unmapped_headers, fuzzy_scores)`` where `fuzzy_scores`
+    holds the confidence of any match made in pass 2, so the UI can show the
+    user which columns were guessed rather than recognised.
+    """
     mapping: dict[str, str] = {}
     used: set[str] = set()
 
@@ -295,8 +564,40 @@ def map_columns(headers: list[str]) -> tuple[dict[str, str], list[str]]:
                 used.add(header)
                 break
 
+    fuzzy_scores: dict[str, float] = {}
+    if fuzzy:
+        for header in headers:
+            if header in used:
+                continue
+            field_name, score = _best_fuzzy_field(header, exclude=set(mapping))
+            if field_name is None:
+                continue
+            mapping[field_name] = header
+            used.add(header)
+            fuzzy_scores[field_name] = score
+
     unmapped = [h for h in headers if h not in used]
-    return mapping, unmapped
+    return mapping, unmapped, fuzzy_scores
+
+
+def _best_fuzzy_field(header: str, *, exclude: set[str]) -> tuple[str | None, float]:
+    """Closest canonical field for a header, or (None, 0.0) below the cutoff."""
+    normalized = _normalize_header(header)
+    if len(normalized) < 3:  # "id", "to" — too short to match on shape alone
+        return None, 0.0
+
+    best_field: str | None = None
+    best_score = FUZZY_CUTOFF
+
+    for field_name, aliases in COLUMN_ALIASES.items():
+        if field_name in exclude:  # already filled by an exact match
+            continue
+        for alias in aliases:
+            score = SequenceMatcher(None, normalized, alias).ratio()
+            if score > best_score:
+                best_field, best_score = field_name, score
+
+    return best_field, round(best_score, 3) if best_field else 0.0
 
 
 def _is_null(raw: str | None) -> bool:
@@ -353,6 +654,58 @@ def _parse_date(raw: str | None) -> date | None:
     return _strptime_any(raw.strip())  # type: ignore[union-attr]
 
 
+# Approximate well-to-wheel emission factors, grams CO2e per tonne-kilometre,
+# in the range published by GLEC/DEFRA for freight. These are rough industry
+# averages, not a certified carbon calculation — the report labels any figure
+# derived from them as an estimate.
+CO2_FACTORS_G_PER_TONNE_KM: dict[TransportMode, float] = {
+    TransportMode.AIR: 500.0,
+    TransportMode.PARCEL: 150.0,
+    TransportMode.ROAD: 75.0,
+    TransportMode.RAIL: 25.0,
+    TransportMode.OCEAN: 12.0,
+    TransportMode.MULTIMODAL: 60.0,
+}
+
+
+def _estimate_co2(
+    mode: TransportMode, distance_km: float | None, weight_kg: float | None
+) -> float | None:
+    """kg CO2e from mode, distance and weight — or None if any is missing.
+
+    Returning None rather than 0.0 is the whole point: a shipment with no
+    weight recorded has *unknown* emissions, and averaging zeros into a
+    sustainability figure would understate it while looking authoritative.
+    """
+    factor = CO2_FACTORS_G_PER_TONNE_KM.get(mode)
+    if factor is None or not distance_km or not weight_kg:
+        return None
+    tonnes = weight_kg / 1000.0
+    return round(tonnes * distance_km * factor / 1000.0, 3)
+
+
+def _parse_bool(raw: str | None) -> bool | None:
+    """Tri-state: True, False, or None for "the file didn't say".
+
+    None matters — a damage rate computed over rows that never carried a damage
+    flag would be a fabricated zero.
+    """
+    if _is_null(raw):
+        return None
+    token = raw.strip().lower()  # type: ignore[union-attr]
+    if token in TRUE_TOKENS:
+        return True
+    if token in FALSE_TOKENS:
+        return False
+    return None
+
+
+def _join_place(city: str | None, country: str | None) -> str | None:
+    """ "Rotterdam, NL" from its parts; whichever part exists if only one does."""
+    parts = [p for p in (city, country) if p]
+    return ", ".join(parts) if parts else None
+
+
 def _clean_str(raw: str | None, *, max_length: int) -> str | None:
     if _is_null(raw):
         return None
@@ -369,6 +722,9 @@ class IngestStats:
     derived_delays: int = 0
     detected_columns: dict[str, str] = field(default_factory=dict)
     unmapped_columns: list[str] = field(default_factory=list)
+    # original header -> match confidence, for columns matched by similarity
+    # rather than by a known alias.
+    fuzzy_columns: dict[str, float] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     truncated: bool = False
 
@@ -379,6 +735,7 @@ class IngestStats:
             derived_delays=self.derived_delays,
             detected_columns=self.detected_columns,
             unmapped_columns=self.unmapped_columns,
+            fuzzy_columns=self.fuzzy_columns,
             warnings=self.warnings,
         )
 
@@ -452,9 +809,12 @@ class CsvIngestService:
             )
 
         headers = [h for h in reader.fieldnames if h]
-        mapping, unmapped = map_columns(headers)
+        mapping, unmapped, fuzzy_scores = map_columns(headers)
         stats.detected_columns = mapping
         stats.unmapped_columns = unmapped
+        stats.fuzzy_columns = {
+            mapping[field_name]: score for field_name, score in fuzzy_scores.items()
+        }
 
         if not mapping:
             raise ValidationError(
@@ -577,7 +937,10 @@ class CsvIngestService:
         for offset, row in enumerate(reader):
             if offset >= max_scan:
                 break
-            mapping, _ = map_columns([cell for cell in row if cell])
+            # Exact matches only: a data row full of free text will fuzzy-match
+            # something eventually, and mistaking it for the header would eat
+            # the real one.
+            mapping, _, _ = map_columns([cell for cell in row if cell], fuzzy=False)
             if mapping:
                 return offset
         # Nothing matched anywhere; leave it at the top so the error the caller
@@ -634,6 +997,10 @@ class CsvIngestService:
         if lead_time is None and shipped and actual:
             lead_time = max((actual - shipped).days, 0)
 
+        transit = _parse_int(value("transit_days"))
+        if transit is None and shipped and actual:
+            transit = max((actual - shipped).days, 0)
+
         status = ShipmentStatus.parse(value("status"))
         if status is ShipmentStatus.UNKNOWN and delay is not None:
             # Infer from the delay so success-rate maths isn't silently wrong.
@@ -644,18 +1011,95 @@ class CsvIngestService:
         # shipment in the right month.
         occurred_on = shipped or actual or scheduled
 
+        dest_country = _clean_str(value("destination_country"), max_length=128)
+        dest_city = _clean_str(value("destination_city"), max_length=128)
+        # A generic destination column wins; otherwise build one from the parts,
+        # because the lane analysis needs a single label per endpoint.
+        destination = _clean_str(value("destination"), max_length=255) or _join_place(
+            dest_city, dest_country
+        )
+
+        quantity = _parse_int(value("quantity"))
+        unit_cost = _parse_float(value("unit_cost"))
+        freight = _parse_float(value("freight_cost"))
+        insurance = _parse_float(value("insurance_cost"))
+        duty = _parse_float(value("customs_duty"))
+
+        total_cost = _parse_float(value("total_cost"))
+        if total_cost is None:
+            # Landed cost = goods + freight + insurance + duty, using whichever
+            # components the file actually carries. All absent stays None.
+            goods = quantity * unit_cost if quantity is not None and unit_cost is not None else None
+            parts = [p for p in (goods, freight, insurance, duty) if p is not None]
+            total_cost = sum(parts) if parts else None
+
+        mode = TransportMode.parse(value("transport_mode"))
+        distance = _parse_float(value("distance_km"))
+        weight = _parse_float(value("weight_kg"))
+
+        co2 = _parse_float(value("co2_kg"))
+        if co2 is None:
+            co2 = _estimate_co2(mode, distance, weight)
+
         return Shipment(
             upload_id=upload_id,
+            # Identifiers
             shipment_ref=_clean_str(value("shipment_ref"), max_length=128),
+            order_ref=_clean_str(value("order_ref"), max_length=128),
+            tracking_number=_clean_str(value("tracking_number"), max_length=128),
+            customer_ref=_clean_str(value("customer_ref"), max_length=128),
+            # Parties
             vendor=_clean_str(value("vendor"), max_length=255),
+            carrier=_clean_str(value("carrier"), max_length=255),
+            customer=_clean_str(value("customer"), max_length=255),
+            service_level=_clean_str(value("service_level"), max_length=64),
+            # Product
             product=_clean_str(value("product"), max_length=255),
+            sku=_clean_str(value("sku"), max_length=128),
+            category=_clean_str(value("category"), max_length=128),
+            brand=_clean_str(value("brand"), max_length=128),
+            quantity=quantity,
+            quantity_delivered=_parse_int(value("quantity_delivered")),
+            unit_cost=unit_cost,
+            currency=_clean_str(value("currency"), max_length=8),
+            weight_kg=weight,
+            hazardous=_parse_bool(value("hazardous")),
+            temperature_controlled=_parse_bool(value("temperature_controlled")),
+            # Geography
             origin_country=_clean_str(value("origin_country"), max_length=128),
-            destination=_clean_str(value("destination"), max_length=255),
-            quantity=_parse_int(value("quantity")),
-            unit_cost=_parse_float(value("unit_cost")),
+            origin_city=_clean_str(value("origin_city"), max_length=128),
+            destination=destination,
+            destination_country=dest_country,
+            destination_city=dest_city,
+            warehouse=_clean_str(value("warehouse"), max_length=128),
+            # Transport
+            transport_mode=mode if mode is not TransportMode.UNKNOWN else None,
+            container_ref=_clean_str(value("container_ref"), max_length=64),
+            vehicle_ref=_clean_str(value("vehicle_ref"), max_length=64),
+            route_ref=_clean_str(value("route_ref"), max_length=64),
+            package_count=_parse_int(value("package_count")),
+            distance_km=distance,
+            # Timing
             lead_time_days=lead_time,
+            transit_days=transit,
             delay_days=max(delay or 0, 0),  # negative "delays" are early arrivals
             status=status,
+            priority=_clean_str(value("priority"), max_length=32),
             shipped_on=occurred_on,
+            scheduled_delivery=scheduled,
+            actual_delivery=actual,
             last_updated=_parse_date(value("last_updated")) or actual,
+            # Money
+            freight_cost=freight,
+            insurance_cost=insurance,
+            customs_duty=duty,
+            total_cost=total_cost,
+            # Quality
+            damaged=_parse_bool(value("damaged")),
+            returned=_parse_bool(value("returned")),
+            # Customs
+            incoterms=_clean_str(value("incoterms"), max_length=16),
+            hs_code=_clean_str(value("hs_code"), max_length=32),
+            # Sustainability
+            co2_kg=co2,
         )

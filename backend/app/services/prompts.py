@@ -10,7 +10,7 @@ exist in the brief, which is what makes the output traceable.
 
 from __future__ import annotations
 
-from app.schemas.analytics import AnalyticsReport
+from app.schemas.analytics import AnalyticsReport, DimensionScore
 from app.services.analytics.risk import describe_drivers
 
 SYSTEM_PROMPT = """You are a supply chain risk analyst writing for a non-technical \
@@ -28,7 +28,10 @@ verbatim in the brief.
 4. Write explanations in two sentences or fewer, in plain English, with no jargon.
 5. Each recommendation must be a concrete action someone could take this week — \
 not "monitor the situation".
-6. Rank risks by business impact, most severe first."""
+6. Rank risks by business impact, most severe first.
+7. The brief only contains sections the customer's file could support. A missing \
+section means that data was not provided — never treat its absence as a good result, \
+and never comment on a dimension that is not in the brief."""
 
 
 def _fmt_money(value: float) -> str:
@@ -99,11 +102,84 @@ def build_metrics_brief(report: AnalyticsReport, *, top_n: int = 5) -> str:
                 f"late={point.late_pct}%, delay={point.avg_delay_days}d"
             )
 
+    # Optional sections. Each is omitted when the upload lacked the columns for
+    # it, which also keeps the model from commenting on dimensions this
+    # customer never provided.
+    lines += _dimension_lines("carriers", report.carriers, top_n)
+    lines += _dimension_lines("transport_modes", report.transport_modes, top_n)
+    lines += _dimension_lines("service_levels", report.service_levels, top_n)
+    lines += _dimension_lines("product_categories", report.categories, top_n)
+    # Lanes are deliberately NOT sent. A lane label embeds the destination,
+    # which in real exports is routinely a customer name or a street address —
+    # the one field in this model most likely to carry personal data. It is
+    # computed locally and shown to the data's owner on the dashboard; that
+    # does not justify sending it to a third-party API to slightly enrich a
+    # narration. See tests/unit/test_security_and_prompts.py.
+    if report.lanes:
+        lines += ["", f"[lanes] {len(report.lanes)} routes analysed (labels withheld)"]
+
+    if report.cost:
+        c = report.cost
+        lines += [
+            "",
+            f"[freight_cost] (covers {c.coverage_pct}% of rows)",
+            f"total_freight_cost: {_fmt_money(c.total_freight_cost)}",
+            f"avg_freight_cost: {_fmt_money(c.avg_freight_cost)}",
+            f"freight_spent_on_late_shipments: {_fmt_money(c.freight_spent_on_late_shipments)}",
+        ]
+        if c.freight_pct_of_goods is not None:
+            lines.append(f"freight_pct_of_goods: {c.freight_pct_of_goods}%")
+        if c.freight_per_unit is not None:
+            lines.append(f"freight_per_unit: {_fmt_money(c.freight_per_unit)}")
+
+    if report.quality:
+        q = report.quality
+        lines += ["", "[quality]", f"perfect_order_rate_pct: {q.perfect_order_rate_pct}%"]
+        if q.damage_rate_pct is not None:
+            lines.append(f"damage_rate_pct: {q.damage_rate_pct}% ({q.damaged_count} shipments)")
+        if q.return_rate_pct is not None:
+            lines.append(f"return_rate_pct: {q.return_rate_pct}% ({q.returned_count} shipments)")
+        if q.avg_fill_rate_pct is not None:
+            lines.append(f"avg_fill_rate_pct: {q.avg_fill_rate_pct}%")
+
+    if report.emissions:
+        e = report.emissions
+        lines += [
+            "",
+            f"[emissions] (covers {e.coverage_pct}% of rows)",
+            f"total_co2_kg: {e.total_co2_kg}",
+            f"avg_co2_per_shipment_kg: {e.avg_co2_per_shipment_kg}",
+        ]
+        if e.co2_by_mode_kg:
+            by_mode = ", ".join(f"{mode}={kg}kg" for mode, kg in e.co2_by_mode_kg.items())
+            lines.append(f"co2_by_mode_kg: {by_mode}")
+
     if report.healthy_signals:
         lines += ["", "[computed_healthy_signals]"]
         lines += [f"  - {signal}" for signal in report.healthy_signals]
 
+    if report.available_dimensions:
+        # Naming what the file *did* carry stops the model inferring that an
+        # absent section means a clean result.
+        lines += ["", f"[dimensions_present] {', '.join(report.available_dimensions)}"]
+
     return "\n".join(lines)
+
+
+def _dimension_lines(name: str, scores: list[DimensionScore], top_n: int) -> list[str]:
+    if not scores:
+        return []
+    lines = ["", f"[{name}] worst {min(top_n, len(scores))} by late rate"]
+    for score in scores[:top_n]:
+        parts = [
+            f"  {score.label}: n={score.shipment_count} ({score.share_pct}% of volume)",
+            f"late={score.late_pct}%",
+            f"avg_delay={score.avg_delay_days}d",
+        ]
+        if score.avg_freight_cost is not None:
+            parts.append(f"avg_freight={_fmt_money(score.avg_freight_cost)}")
+        lines.append(", ".join(parts))
+    return lines
 
 
 def build_analysis_prompt(report: AnalyticsReport) -> str:

@@ -35,26 +35,41 @@ def compute_risk(facts: Sequence[ShipmentFact], kpis: KpiSummary) -> RiskBreakdo
             weights=dict(WEIGHTS),
         )
 
-    components = {
+    components: dict[str, float] = {
         # How often things go wrong.
         "late_rate": clamp(kpis.late_shipment_pct / 100.0),
         # How badly, when they do.
         "delay_severity": clamp(kpis.avg_delay_days / DELAY_CAP_DAYS),
-        # How much money is exposed.
-        "value_at_risk": clamp(safe_div(kpis.value_at_risk, kpis.total_value)),
         # Single-supplier and single-origin dependency.
         "vendor_concentration": clamp(herfindahl(vendor_shares(facts))),
         "country_concentration": clamp(herfindahl(country_shares(facts))),
     }
 
-    score = round_to(sum(components[key] * weight for key, weight in WEIGHTS.items()) * 100)
+    # Money exposure is only a component when the file priced anything. Scoring
+    # it as 0.0 otherwise would be a silent 20-point discount for uploads with
+    # no cost column: the same supply chain would look safer purely because it
+    # told us less. Instead the weight is redistributed over what we *can*
+    # measure, so every score is a full 0-100 regardless of file shape.
+    if kpis.total_value > 0:
+        components["value_at_risk"] = clamp(safe_div(kpis.value_at_risk, kpis.total_value))
+
+    weights = _renormalise({key: WEIGHTS[key] for key in components})
+    score = round_to(sum(components[key] * weight for key, weight in weights.items()) * 100)
 
     return RiskBreakdown(
         score=score,
         level=RiskLevel.from_score(score),
         components={k: round_to(v, 4) for k, v in components.items()},
-        weights=dict(WEIGHTS),
+        weights={k: round_to(v, 4) for k, v in weights.items()},
     )
+
+
+def _renormalise(active: dict[str, float]) -> dict[str, float]:
+    """Scale a subset of the weights back up to sum to 1.0."""
+    total = sum(active.values())
+    if total <= 0:
+        return active
+    return {key: weight / total for key, weight in active.items()}
 
 
 def describe_drivers(breakdown: RiskBreakdown, *, top_n: int = 3) -> list[str]:

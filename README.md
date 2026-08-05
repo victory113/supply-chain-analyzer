@@ -112,7 +112,7 @@ The dependency direction is strictly one-way: `api → services → repositories
 |---|---|
 | `users` | Accounts. bcrypt password hashes, never plaintext. |
 | `uploads` | One CSV ingestion event: filename, row counts, status, error. |
-| `shipments` | Normalised rows. Composite indexes on `(upload_id, vendor)` and `(upload_id, origin_country)`. |
+| `shipments` | The canonical record — ~50 fields spanning identity, parties, product, geography, transport, timing, money, quality, customs and carbon. Everything except `upload_id`, `delay_days` and `status` is nullable, because a field the source never supplied must stay NULL rather than default to a zero that reads as a measurement. Composite indexes on `(upload_id, vendor)`, `(upload_id, origin_country)` and `(upload_id, carrier)`. |
 | `analyses` | One AI run: status, summary, risk score, token usage, and a `metrics_snapshot` of everything that grounded it. |
 | `risks` | Individual findings, each with an `evidence_metric` pointing back at the computed field it cites. |
 
@@ -175,8 +175,25 @@ Observed, not geopolitical — derived only from how that origin has actually pe
 ```
 Concentration is a Herfindahl index over spend share: 1.0 means a single supplier carries everything. The API returns the score, its components, *and* the weights, so the dashboard can explain why a number moved, and `describe_drivers()` ranks drivers by contribution (component × weight) rather than raw value.
 
+Components the upload can't support are dropped and their weight redistributed over the rest — otherwise a file without prices would score 20 points safer than the same supply chain with them.
+
 ### Trends
 Monthly buckets, with direction called by comparing the first half of the series against the second — more robust than first-vs-last point. Fewer than 3 dated periods returns `insufficient_data` rather than inventing a trend.
+
+### Optional dimensions
+Computed only when the upload carries the columns for them, and omitted entirely when it doesn't:
+
+| Section | Needs | Reports |
+|---|---|---|
+| Carrier / mode / service / category | that column | Share of volume, late %, avg delay, avg freight, worst first |
+| Trade lanes | origin + destination | Same, per origin→destination route |
+| Freight economics | freight cost | Total and per-shipment spend, freight as % of goods value, per unit, per kg, **and how much freight was paid on deliveries that still arrived late** |
+| Order quality | damage / return / delivered qty | Damage rate, return rate, fill rate, and perfect-order rate (on time, undamaged, not returned, fully filled) |
+| Carbon footprint | CO₂, or mode + distance + weight | Total and per-shipment CO₂e, split by transport mode |
+
+Carrier, mode, lane and service level all answer the same question, so they share one grouping routine rather than four near-identical ones. Groups with fewer than 2 shipments are excluded, and a dimension with only one distinct value is dropped — "100% of your shipments went by road" is noise, not insight. Rows missing the dimension are excluded rather than bucketed as "Unknown", so they can't corrupt a real group's numbers.
+
+CO₂ estimates use published average emission factors per tonne-kilometre (GLEC/DEFRA range) and are labelled as estimates in both the UI and the API. A shipment with no weight yields `None`, not `0.0` — unknown emissions averaged as zero would understate the total while looking authoritative.
 
 ---
 
@@ -280,6 +297,14 @@ A few decisions that took more thought than the code suggests:
 **The cache can always be down — and must be cheap when it is.** Every Redis operation degrades to "no cache", but *degrading gracefully is not the same as degrading cheaply*. Running the app without Redis showed redis-py retrying each refused connection internally, so a page issuing a get and a set paid ~8 seconds. A circuit breaker now opens after three consecutive failures and short-circuits for 30 seconds. It also cut the test suite from 146s to 22s.
 
 **Celery cannot be made to fail fast on publish.** Same session, worse symptom: with the broker down, uploads hung indefinitely. `retry=False` on `apply_async` disables *publish* retry, but kombu still runs its own connection loop (100 attempts by default), and turning that off globally would stop a live worker from reconnecting. So the API TCP-probes the broker itself before publishing and goes straight to the in-process fallback when nothing answers. Uploads went from hanging to 202-in-1.4s.
+
+**One canonical model, many source schemas.** Real companies receive shipment data from dozens of ERP, WMS, TMS and carrier systems that agree on nothing — so the app doesn't parse "a CSV format", it maps *any* export onto a ~50-field canonical shipment record and computes against that. Adding support for a new source system is an alias change, never an analytics change. Matching runs in two passes: ~350 exact aliases, then a fuzzy pass (`difflib`, 0.87 cutoff) that recovers typos like `Suppler Name` in someone's export. The cutoff is deliberately high — a *wrong* mapping is far worse than an unmapped column, because it silently feeds the wrong numbers into every metric downstream. Fuzzy matches are reported to the user as guesses rather than folded in with recognised columns.
+
+**Ordering in that alias table is a load-bearing detail.** A header is claimed by the first canonical field that matches it, so when the model was widened, `carrier` never received a single column — `vendor` had listed `"carrier"` as one of its own aliases years earlier and silently ate it. `sku` and `brand` lost theirs to `product` the same way. There is now a test that walks the whole table and fails on any alias claimed twice; it caught two more dead entries (`pack_price`, `proNumber`) that could never have matched anything, because aliases are compared *after* normalisation and both contained characters normalisation strips.
+
+**A missing column must never look like a measurement.** Every optional section is omitted when the upload can't support it — no carrier column means no carrier table, not a table of zeros. The subtle version of this bug was in the risk score itself: `value_at_risk` is a 0.20-weighted component, so a file with no price column scored a flat 20 points *safer* than an identical supply chain that happened to include one. Unmeasurable components are now dropped and their weight redistributed across the rest, so every score is a true 0–100 regardless of file shape. The same rule applies in the UI, where an absent lead time or order value renders as "—" with the reason, not "0.0d" or "$0".
+
+**Lane analysis is computed but never sent to the model.** A lane label embeds the destination, which in real exports is routinely a customer name or a street address — the field in this model most likely to carry personal data. It's computed locally and shown to the data's owner; enriching an LLM narration doesn't justify putting it on the wire to a third party. There's a test asserting lane labels stay out of the prompt.
 
 **Ingestion is forgiving about cells, strict about rows.** Real exports are inconsistent, so columns are matched by alias (`"Unit Cost"`, `"unit_cost"`, `"unitprice"` all resolve), the delimiter is sniffed (`, ; tab |`), encodings fall back through UTF-8-BOM → cp1252, and an unparseable cell becomes null. A row is rejected only when *every* recognised column is empty — an earlier rule demanded a vendor, reference or product specifically, and silently threw away entire public datasets whose identity column happened to be named something else. Rejection counts are surfaced, not hidden.
 
