@@ -8,7 +8,7 @@ Create an account with any email, click **Try sample data**, and the dashboard f
 
 Bringing your own file? Any shipment or order CSV up to 100 MB works, without renaming a single column — [**what files can I upload?**](./DATA.md)
 
-> **First load takes 30–60 seconds.** The API runs on a free tier that sleeps when idle; it wakes on the first request. Reload if it errors once.
+> **First load takes 30–60 seconds.** The API runs on a free tier that sleeps when idle. The app detects this and retries automatically with a "waking the server" notice — no need to reload.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
@@ -303,6 +303,8 @@ A few decisions that took more thought than the code suggests:
 **Ordering in that alias table is a load-bearing detail.** A header is claimed by the first canonical field that matches it, so when the model was widened, `carrier` never received a single column — `vendor` had listed `"carrier"` as one of its own aliases years earlier and silently ate it. `sku` and `brand` lost theirs to `product` the same way. There is now a test that walks the whole table and fails on any alias claimed twice; it caught two more dead entries (`pack_price`, `proNumber`) that could never have matched anything, because aliases are compared *after* normalisation and both contained characters normalisation strips.
 
 **A missing column must never look like a measurement.** Every optional section is omitted when the upload can't support it — no carrier column means no carrier table, not a table of zeros. The subtle version of this bug was in the risk score itself: `value_at_risk` is a 0.20-weighted component, so a file with no price column scored a flat 20 points *safer* than an identical supply chain that happened to include one. Unmeasurable components are now dropped and their weight redistributed across the rest, so every score is a true 0–100 regardless of file shape. The same rule applies in the UI, where an absent lead time or order value renders as "—" with the reason, not "0.0d" or "$0".
+
+**A sleeping server is not a failed request.** The free tier spins down after ~15 minutes idle, and while the container boots the platform edge answers with a bare `503`. The app used to surface that verbatim — `Request failed with status 503` on the login screen, which reads as "this project is broken" to anyone clicking the demo link. The distinction that fixes it: *our* 5xx responses carry the JSON error envelope, the platform's do not, so an envelope-less `502/503/504` provably never reached the app. Those are retried with backoff (up to ~42s) behind a "waking the server" notice, and everything else fails immediately as before. Retrying a `POST` is safe for exactly the same reason — a gateway error means nothing was processed.
 
 **Lane analysis is computed but never sent to the model.** A lane label embeds the destination, which in real exports is routinely a customer name or a street address — the field in this model most likely to carry personal data. It's computed locally and shown to the data's owner; enriching an LLM narration doesn't justify putting it on the wire to a third party. There's a test asserting lane labels stay out of the prompt.
 

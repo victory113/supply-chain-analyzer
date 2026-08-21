@@ -48,7 +48,34 @@ export class ApiError extends Error {
   get isUpstreamError(): boolean {
     return this.status === 502 || this.status === 503;
   }
+
+  /** The platform returned a gateway error — our app never saw the request. */
+  get isColdStart(): boolean {
+    return this.code === 'cold_start';
+  }
 }
+
+// ── Cold starts ───────────────────────────────────────────────────────
+// The API runs on a free tier that sleeps after ~15 minutes idle and takes
+// 30-60s to wake. During that window the platform's edge answers with a bare
+// 502/503/504 and the request never reaches the app at all — which is exactly
+// why retrying is safe here even for POST: nothing was processed.
+//
+// The distinction that makes this work: our own 503s carry the JSON error
+// envelope, the platform's do not. Only the envelope-less ones are retried.
+
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+const RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 12_000, 16_000];
+
+/** Notified when a request is waiting on a sleeping server, so the UI can say so. */
+type ColdStartHandler = (waking: boolean) => void;
+let onColdStart: ColdStartHandler | null = null;
+
+export function setColdStartHandler(handler: ColdStartHandler | null): void {
+  onColdStart = handler;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ── Token storage ─────────────────────────────────────────────────────
 // localStorage is a deliberate tradeoff: it survives a refresh and keeps the
@@ -104,10 +131,12 @@ async function parseError(response: Response): Promise<ApiError> {
   let code = 'http_error';
   let message = `Request failed with status ${response.status}`;
   let details: Record<string, unknown> | undefined;
+  let hadEnvelope = false;
 
   try {
     const body = (await response.json()) as Partial<ApiErrorBody>;
     if (body.error) {
+      hadEnvelope = true;
       code = body.error.code ?? code;
       message = body.error.message ?? message;
       details = body.error.details;
@@ -116,10 +145,45 @@ async function parseError(response: Response): Promise<ApiError> {
     // Non-JSON error body (proxy timeout, HTML error page) — keep the default.
   }
 
+  // No envelope on a gateway status means the platform answered, not us.
+  if (!hadEnvelope && GATEWAY_STATUSES.has(response.status)) {
+    return new ApiError(
+      response.status,
+      'cold_start',
+      'The server is starting up — this can take up to a minute on the free tier. Please try again in a moment.',
+    );
+  }
+
   return new ApiError(response.status, code, message, details);
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  let waking = false;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await attemptRequest<T>(path, options);
+      if (waking) onColdStart?.(false);
+      return result;
+    } catch (error) {
+      const retryable =
+        error instanceof ApiError && error.isColdStart && attempt < RETRY_DELAYS_MS.length;
+
+      if (!retryable) {
+        if (waking) onColdStart?.(false);
+        throw error;
+      }
+
+      if (!waking) {
+        waking = true;
+        onColdStart?.(true);
+      }
+      await sleep(RETRY_DELAYS_MS[attempt] ?? 16_000);
+    }
+  }
+}
+
+async function attemptRequest<T>(path: string, options: RequestOptions): Promise<T> {
   const { method = 'GET', body, formData, signal, anonymous = false } = options;
 
   const headers: Record<string, string> = {};

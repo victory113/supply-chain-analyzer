@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '@/auth/useAuth';
+import { ColdStartBanner } from '@/components/ColdStartBanner';
 import { Field } from '@/components/ui/Field';
 import { InlineError } from '@/components/ui/States';
 
@@ -43,6 +44,8 @@ export function LoginPage() {
       <div className="auth-card">
         <h1 className="auth-title">Sign in</h1>
         <p className="auth-subtitle">Analyse your supply chain data.</p>
+
+        <ColdStartBanner />
 
         <form className="stack" style={{ gap: 14 }} onSubmit={handleSubmit}>
           <Field
