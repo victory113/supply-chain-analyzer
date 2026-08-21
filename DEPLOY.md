@@ -2,7 +2,7 @@
 
 Step by step, free tier, roughly 45 minutes the first time.
 
-**End state:** a public URL you can put on a résumé, backed by real Postgres.
+**End state:** a public URL serving the app, backed by real Postgres.
 
 You'll create accounts on three services. All three have genuine free tiers —
 no card required for Neon or Netlify; Render asks for one on some plans but the
@@ -148,8 +148,8 @@ git push
 
 *You should see:* a URL like `https://cheerful-tanuki-1a2b3c.netlify.app`.
 
-Rename it under **Site configuration → Change site name** to something you'd
-put on a résumé — `victory-supply-chain`, say.
+Rename it under **Site configuration → Change site name** to something
+readable — `supply-chain-analyzer`, say.
 
 ---
 
@@ -160,34 +160,28 @@ Open your Netlify URL.
 1. Register an account.
 2. Click **Try sample data**.
 
-**Be patient on the first request.** Render's free tier sleeps after 15
-minutes of inactivity, and waking it takes 30–60 seconds. During that window
-the frontend shows a connection error. Reload and it works.
+**The first request wakes the server.** Render's free tier sleeps after 15
+minutes of inactivity and takes 30–60 seconds to start. The frontend detects
+this and retries automatically behind a "waking the server" notice, so no
+reload is needed — it just takes a moment.
 
 *Working means:* dashboard populates with KPIs, the risk gauge, the trend
 chart, and the AI risk assessment a few seconds later.
 
 ---
 
-## Step 6. Put it on your résumé
+## Step 6. Update the project docs
 
-Add the live link to the README, replacing the old Netlify URL near the top:
-
-```markdown
-**[Live demo](https://your-site.netlify.app)** · [Source](https://github.com/victory113/supply-chain-analyzer)
-```
-
-Then add a screenshot. The repo has none — the old one showed the v1 interface
-and was removed. Take a fresh capture of the upload detail page (KPIs, risk
-gauge and vendor chart in one frame), save it as `screenshot.png` at the repo
-root, and reference it under the intro:
+Point the README at the deployment so a visitor can reach it without reading
+the setup:
 
 ```markdown
-![Dashboard](./screenshot.png)
+### ▶ [Try it live](https://your-site.netlify.app) · [API docs](https://your-api.onrender.com/docs)
 ```
 
-Most people who see the repo will never clone it, so this is doing more work
-than the architecture section.
+If the UI has changed since the current `screenshot.png`, replace it: capture
+the upload detail page with the KPIs, risk gauge and vendor chart in one frame
+and save it at the repo root.
 
 ---
 
