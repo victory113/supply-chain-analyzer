@@ -13,6 +13,7 @@ instantly until the cooldown expires.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -32,13 +33,27 @@ FAILURE_THRESHOLD = 3
 COOLDOWN_SECONDS = 30.0
 
 _client: aioredis.Redis | None = None
+_client_loop: asyncio.AbstractEventLoop | None = None
 _consecutive_failures = 0
 _circuit_open_until = 0.0
 
 
 def get_redis() -> aioredis.Redis:
-    global _client
-    if _client is None:
+    """The Redis client for the event loop that is running now.
+
+    redis-py connections belong to the loop that opened them. The API runs one
+    loop for its whole life, but each Celery task runs in a fresh
+    ``asyncio.run()`` loop (see ``run_async`` in workers/tasks.py, which builds a
+    per-task DB engine for the same reason), and so does each test. A client
+    kept from an earlier loop fails with "Event loop is closed" -- a
+    RuntimeError the breaker below doesn't catch. So the client is rebuilt
+    whenever the running loop changes; the old one's loop is already closed,
+    so there is nothing left to close.
+    """
+    global _client, _client_loop
+    loop = asyncio.get_running_loop()
+    if _client is None or _client_loop is not loop:
+        _client_loop = loop
         _client = aioredis.from_url(
             str(settings.redis_url),
             encoding="utf-8",
@@ -51,10 +66,11 @@ def get_redis() -> aioredis.Redis:
 
 
 async def close_redis() -> None:
-    global _client
+    global _client, _client_loop
     if _client is not None:
         await _client.aclose()
         _client = None
+        _client_loop = None
 
 
 # ── Circuit breaker ───────────────────────────────────────────────────

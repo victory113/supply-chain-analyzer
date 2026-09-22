@@ -7,6 +7,7 @@ the request for minutes instead of falling back.
 
 from __future__ import annotations
 
+import asyncio
 import socket
 
 import pytest
@@ -54,6 +55,37 @@ def _reset_state():
     yield
     cache.reset_circuit()
     broker.reset_probe_cache()
+
+
+class TestClientLifetime:
+    """The client must not outlive its event loop.
+
+    Written after CI failed with "Event loop is closed": CI runs a real Redis,
+    and a client created in one test's loop was reused by the next. Celery
+    tasks hit the same thing in production, since each runs in a fresh
+    ``asyncio.run()`` loop.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh_client(self, monkeypatch):
+        monkeypatch.setattr(cache, "_client", None)
+        monkeypatch.setattr(cache, "_client_loop", None, raising=False)
+        # Each call builds a distinct stand-in, so identity shows reuse.
+        monkeypatch.setattr(cache.aioredis, "from_url", lambda *a, **k: object())
+
+    def test_one_loop_reuses_one_client(self):
+        async def twice():
+            return cache.get_redis(), cache.get_redis()
+
+        first, second = asyncio.run(twice())
+        assert first is second
+
+    def test_a_new_loop_gets_a_new_client(self):
+        async def get():
+            return cache.get_redis()
+
+        # Two asyncio.run() calls: two loops, like two Celery tasks or tests.
+        assert asyncio.run(get()) is not asyncio.run(get())
 
 
 class TestCacheHappyPath:
