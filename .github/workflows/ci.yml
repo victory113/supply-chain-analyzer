@@ -160,13 +160,20 @@ jobs:
         with:
           context: ./backend
           push: false
+          # Hand the image to the local Docker engine. buildx builds in its own
+          # container, so without this `docker run` below can't find the image.
+          load: true
           tags: supply-chain-analyzer-api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Proves the image starts and serves. There is no database here, so the
+      # entrypoint's migration step is switched off; migrations are checked
+      # against a real Postgres in the test job instead.
       - name: Smoke-test the image
         run: |
           docker run --rm -d --name api-smoke -p 8000:8000 \
+            -e RUN_MIGRATIONS=0 \
             -e SECRET_KEY=ci-secret-key \
             -e DATABASE_URL=postgresql+asyncpg://u:p@localhost:5432/none \
             supply-chain-analyzer-api:${{ github.sha }}
