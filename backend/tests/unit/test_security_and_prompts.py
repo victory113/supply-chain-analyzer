@@ -14,7 +14,7 @@ from app.core.security import (
     verify_password,
 )
 from app.services.analytics import build_report
-from app.services.chat import route_intent
+from app.services.chat import AGENT_SYSTEM_PROMPT
 from app.services.prompts import build_analysis_prompt, build_metrics_brief
 from tests.conftest import make_fact
 
@@ -104,16 +104,18 @@ class TestPrompts:
         assert all(lane.label not in brief for lane in report.lanes)
 
 
-class TestChatIntentRouting:
-    def test_vendor_question_selects_the_vendor_section(self):
-        assert "vendors" in route_intent("Which supplier is worst?")
+class TestAgentSystemPrompt:
+    """The chat assistant chooses its own retrieval, so the prompt is the only
+    place the grounding rules are stated. These pin the ones that matter."""
 
-    def test_geography_question_selects_the_country_section(self):
-        assert "countries" in route_intent("Which origin country is riskiest?")
+    def test_the_model_is_forbidden_from_inventing_figures(self):
+        assert "Never state a figure that did not come back from a tool" in AGENT_SYSTEM_PROMPT
 
-    def test_temporal_question_selects_the_trend_section(self):
-        assert "trend" in route_intent("Why are delays increasing this year?")
+    def test_absent_data_must_be_reported_not_treated_as_zero(self):
+        assert "Absent data is not zero" in AGENT_SYSTEM_PROMPT
 
-    def test_kpis_and_risk_are_always_included(self):
-        sections = route_intent("something completely unrelated")
-        assert {"kpis", "risk"} <= sections
+    def test_the_model_is_told_it_may_chain_tool_calls(self):
+        assert "in sequence" in AGENT_SYSTEM_PROMPT
+
+    def test_dataset_names_may_not_be_invented(self):
+        assert "Never invent a dataset name" in AGENT_SYSTEM_PROMPT

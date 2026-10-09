@@ -345,10 +345,24 @@ export interface ChatRequest {
   history?: ChatTurn[];
 }
 
+/**
+ * One tool the model chose to call, in the order it called them.
+ *
+ * The assistant decides its own retrieval now, so this trace is how a user
+ * tells a well-grounded answer from a lucky one.
+ */
+export interface ChatToolCall {
+  name: string;
+  arguments: Record<string, string>;
+  ok: boolean;
+  summary: string;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
   uploads_considered: number;
+  tool_calls: ChatToolCall[];
 }
 
 // ── Errors ────────────────────────────────────────────────────────────

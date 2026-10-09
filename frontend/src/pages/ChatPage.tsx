@@ -4,7 +4,8 @@ import type { FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { chatApi, queryKeys, uploadsApi } from '@/api/endpoints';
-import type { ChatSource, ChatTurn } from '@/api/types';
+import type { ChatSource, ChatToolCall, ChatTurn } from '@/api/types';
+import { ToolTrace } from '@/components/ToolTrace';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
@@ -25,6 +26,7 @@ const MAX_HISTORY_TURNS = 8;
 interface Exchange {
   turn: ChatTurn;
   sources?: ChatSource[];
+  toolCalls?: ChatToolCall[];
   uploadsConsidered?: number;
 }
 
@@ -54,6 +56,7 @@ export function ChatPage() {
         {
           turn: { role: 'assistant', content: response.answer },
           sources: response.sources,
+          toolCalls: response.tool_calls,
           uploadsConsidered: response.uploads_considered,
         },
       ]);
@@ -106,7 +109,7 @@ export function ChatPage() {
         <div>
           <h1 className="page-title">Ask AI</h1>
           <p className="page-subtitle">
-            Answers are retrieved from your stored metrics and cite what they used.
+            The assistant looks up your metrics itself and shows every step it took.
           </p>
         </div>
 
@@ -163,25 +166,17 @@ export function ChatPage() {
             >
               {exchange.turn.content}
 
-              {exchange.sources && exchange.sources.length > 0 && (
-                <div className="chat-sources">
-                  {exchange.sources.map((source) => (
-                    <span
-                      key={`${source.kind}-${source.reference}`}
-                      className="badge badge-neutral"
-                      title={source.detail}
-                    >
-                      {source.reference}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* The trace replaces the old source badges: it carries the same
+                  grounding information plus the order the model worked in. */}
+              {exchange.toolCalls && <ToolTrace calls={exchange.toolCalls} />}
             </div>
           ))}
 
           {askMutation.isPending && (
             <div className="chat-turn assistant">
-              <Spinner label="Retrieving your metrics…" />
+              {/* It may take several lookups, so the wait is longer than a
+                  single request and the label should say what's happening. */}
+              <Spinner label="Looking up your data…" />
             </div>
           )}
         </div>

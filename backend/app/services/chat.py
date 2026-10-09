@@ -1,227 +1,155 @@
-"""Retrieval-grounded Q&A over the user's stored supply chain data.
+"""Tool-using agent for questions about the user's stored supply chain data.
 
-This is RAG over *structured* business data rather than documents: instead of
-embedding prose, we retrieve the relevant slices of the computed analytics
-(KPIs, vendor scores, country risk, trend series, prior analyses) and put only
-those in the prompt. Retrieval is keyword-routed, which for a fixed, small set
-of metric families is both cheaper and more predictable than a vector search.
+This used to be a keyword router: the server scanned the question for words
+like "vendor" or "trend", decided which metric families to retrieve, pasted
+them all into one prompt, and asked for an answer. That works for questions
+whose shape you anticipated, and fails quietly for everything else — a
+question about carriers retrieved vendor data because "who" was in the
+keyword list, and nothing reported that the wrong thing had been fetched.
+
+Now the model is given tools and decides for itself. "Which carrier is worst,
+and is that getting better?" becomes a carrier lookup followed by a trend
+lookup, chosen by the model, in that order, because the second question
+depends on the answer to the first. That is the difference between retrieval
+and an agent: not that the model is cleverer, but that the *sequence* is no
+longer fixed in advance by us.
+
+What did not change is the grounding boundary. Tools return metrics computed
+in Python; the model still never calculates a figure of its own.
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
-from app.repositories.analysis import AnalysisRepository
 from app.repositories.upload import UploadRepository
-from app.schemas.analytics import AnalyticsReport
-from app.schemas.chat import ChatRequest, ChatResponse, ChatSource
-from app.services.analysis import AnalysisService
+from app.schemas.chat import ChatRequest, ChatResponse, ChatSource, ChatToolCall
+from app.services.agent_tools import AgentToolset
 from app.services.claude import ClaudeService
 
 logger = get_logger(__name__)
 
-# Question keywords -> which metric families to retrieve.
-INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "vendors": ("vendor", "supplier", "manufacturer", "who", "worst", "best", "partner"),
-    "countries": ("country", "region", "origin", "geographic", "where", "china", "import"),
-    "trend": (
-        "trend",
-        "over time",
-        "increasing",
-        "rising",
-        "falling",
-        "month",
-        "year",
-        "changed",
-        "changing",
-        "why",
-        "worse",
-        "better",
-    ),
-    "risk": ("risk", "score", "exposure", "danger", "critical", "concern"),
-    "analysis": ("recommend", "should", "advice", "fix", "mitigate", "action", "do"),
-}
+# Enough for "look it up, then look up the thing that depends on it, then
+# answer" with room to recover from one bad dataset name. Higher mostly buys
+# latency: each step is a full round trip to the model.
+MAX_AGENT_STEPS = 6
 
-# When nothing matches, these give a useful general answer.
-DEFAULT_SECTIONS = ("kpis", "risk", "vendors")
+AGENT_SYSTEM_PROMPT = """You are a supply chain analyst answering questions about \
+the user's own uploaded shipment data.
 
-# Cap how many datasets go into one prompt — beyond this the context is mostly
-# noise and the token cost stops paying for itself.
-MAX_UPLOADS_IN_CONTEXT = 6
+You cannot see the data directly. Use the provided tools to retrieve it, then answer \
+from what they return.
 
-
-def route_intent(question: str) -> set[str]:
-    """Pick which metric families are relevant to the question."""
-    lowered = question.lower()
-    sections = {
-        section
-        for section, keywords in INTENT_KEYWORDS.items()
-        if any(keyword in lowered for keyword in keywords)
-    }
-    sections.update(DEFAULT_SECTIONS[:2])  # KPIs and risk are always useful context
-    return sections or set(DEFAULT_SECTIONS)
+Rules:
+1. Never state a figure that did not come back from a tool. You have no other source \
+for numbers, and you must not estimate, extrapolate or recall one.
+2. Call as many tools as the question needs, including several in sequence when a \
+later lookup depends on an earlier answer. Do not call tools you do not need.
+3. If a tool reports that a dataset has no data for something, say that plainly. \
+Absent data is not zero, and "the file didn't include carrier information" is a \
+correct and useful answer.
+4. If a tool returns an error, read it — it usually names the valid options — and \
+retry once with a corrected argument.
+5. Answer in plain English for a business reader. Two short paragraphs at most. \
+Cite the specific figures you used.
+6. Never invent a dataset name. Call list_datasets if you are unsure what exists."""
 
 
 class ChatService:
     def __init__(self, session: AsyncSession, *, claude: ClaudeService | None = None) -> None:
         self.session = session
         self.uploads = UploadRepository(session)
-        self.analyses = AnalysisRepository(session)
         self.claude = claude or ClaudeService()
-        self.analysis_service = AnalysisService(session, claude=self.claude)
 
     async def ask(self, request: ChatRequest, user_id: uuid.UUID) -> ChatResponse:
-        sections = route_intent(request.question)
-        reports = await self._retrieve(request.upload_id, user_id)
+        # Fail before spending a model call if there is nothing to talk about.
+        if await self.uploads.count_for_user(user_id) == 0:
+            raise NotFoundError("No uploads found. Upload a CSV before asking questions.")
 
-        if not reports:
-            raise NotFoundError("No analysed uploads found. Upload a CSV before asking questions.")
+        if (
+            request.upload_id is not None
+            and await self.uploads.get_for_user(request.upload_id, user_id) is None
+        ):
+            raise NotFoundError("Upload not found.")
 
-        context_parts: list[str] = []
-        sources: list[ChatSource] = []
+        toolset = AgentToolset(
+            session=self.session,
+            user_id=user_id,
+            upload_id=request.upload_id,
+        )
 
-        for label, report in reports:
-            block, block_sources = self._render(label, report, sections)
-            context_parts.append(block)
-            sources.extend(block_sources)
+        messages: list[dict[str, Any]] = [
+            *(turn.model_dump() for turn in request.history),
+            {"role": "user", "content": request.question},
+        ]
 
-        result = await self.claude.answer_question(
-            request.question,
-            "\n\n".join(context_parts),
-            uploads_considered=len(reports),
-            history=[turn.model_dump() for turn in request.history],
+        result = await self.claude.run_agent(
+            system=AGENT_SYSTEM_PROMPT,
+            messages=messages,
+            tools=toolset.definitions(),
+            execute=toolset.execute,
+            max_steps=MAX_AGENT_STEPS,
         )
 
         logger.info(
             "chat_answered",
             user_id=str(user_id),
-            uploads=len(reports),
-            sections=sorted(sections),
+            tool_calls=len(toolset.calls),
+            tools_used=[call.name for call in toolset.calls],
             input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            duration_ms=result.duration_ms,
         )
 
         return ChatResponse(
             answer=result.payload,
-            sources=sources,
-            uploads_considered=len(reports),
+            # The trace is the audit trail: it shows which data the answer was
+            # actually built from, chosen by the model rather than by us.
+            tool_calls=[
+                ChatToolCall(
+                    name=call.name,
+                    arguments={k: str(v) for k, v in call.arguments.items()},
+                    ok=call.ok,
+                    summary=call.summary,
+                )
+                for call in toolset.calls
+            ],
+            sources=_sources_from_calls(toolset),
+            uploads_considered=len(toolset.datasets_touched()),
         )
 
-    async def _retrieve(
-        self, upload_id: uuid.UUID | None, user_id: uuid.UUID
-    ) -> list[tuple[str, AnalyticsReport]]:
-        """Fetch the analytics reports the question should be answered from."""
-        if upload_id is not None:
-            upload = await self.uploads.get_for_user(upload_id, user_id)
-            if upload is None:
-                raise NotFoundError("Upload not found.")
-            report = await self.analysis_service.build_report(upload.id)
-            return [(upload.label or upload.filename, report)]
 
-        # No scope given: use the most recent datasets, newest first.
-        uploads = await self.uploads.list_for_user(user_id, limit=MAX_UPLOADS_IN_CONTEXT)
-        reports: list[tuple[str, AnalyticsReport]] = []
-        for upload in uploads:
-            analysis = await self.analyses.latest_for_upload(upload.id)
-            if analysis is None or not analysis.metrics_snapshot:
-                continue
-            reports.append(
-                (
-                    upload.label or upload.filename,
-                    AnalyticsReport.model_validate(analysis.metrics_snapshot),
-                )
-            )
-        return reports
+# Tool name -> the source kind the UI groups it under.
+_SOURCE_KINDS = {
+    "get_kpis": "kpi",
+    "get_vendor_scores": "vendor",
+    "get_country_risk": "country",
+    "get_trend": "trend",
+    "get_risk_breakdown": "risk",
+    "get_dimension": "dimension",
+    "get_operations_summary": "operations",
+    "get_history": "history",
+    "list_datasets": "catalog",
+}
 
-    @staticmethod
-    def _render(
-        label: str, report: AnalyticsReport, sections: set[str]
-    ) -> tuple[str, list[ChatSource]]:
-        """Render only the requested sections, and record what was included."""
-        lines = [f"--- DATASET: {label} ---"]
-        sources: list[ChatSource] = []
-        k = report.kpis
 
-        # KPIs anchor every answer, so they are included unconditionally.
-        lines += [
-            "[kpis]",
-            f"shipments={k.total_shipments}, late={k.late_shipment_pct}%, "
-            f"avg_delay={k.avg_delay_days}d, p90_delay={k.p90_delay_days}d, "
-            f"success_rate={k.delivery_success_rate}%, "
-            f"value_at_risk=${k.value_at_risk:,.0f}",
-        ]
+def _sources_from_calls(toolset: AgentToolset) -> list[ChatSource]:
+    """Keep the existing `sources` contract, derived from what actually ran."""
+    sources: list[ChatSource] = []
+    for call in toolset.calls:
+        if not call.ok:
+            continue
+        dataset = str(call.arguments.get("dataset", "")).strip()
         sources.append(
             ChatSource(
-                kind="kpi",
-                reference=f"{label} / kpis",
-                detail=f"{k.total_shipments} shipments, {k.late_shipment_pct}% late",
+                kind=_SOURCE_KINDS.get(call.name, "metric"),
+                reference=f"{dataset} / {call.name}" if dataset else call.name,
+                detail=call.summary,
             )
         )
-
-        if "risk" in sections:
-            lines += [
-                "[risk]",
-                f"composite={report.risk.score}/100 ({report.risk.level.value})",
-                f"components={report.risk.components}",
-            ]
-            sources.append(
-                ChatSource(
-                    kind="risk",
-                    reference=f"{label} / risk",
-                    detail=f"composite score {report.risk.score}",
-                )
-            )
-
-        if "vendors" in sections and report.vendors:
-            lines.append("[vendors] worst-first")
-            for vendor in report.vendors[:5]:
-                lines.append(
-                    f"  {vendor.vendor}: health={vendor.health_score}, "
-                    f"late={vendor.late_pct}%, avg_delay={vendor.avg_delay_days}d, "
-                    f"shipments={vendor.shipment_count}"
-                )
-            sources.append(
-                ChatSource(
-                    kind="vendor",
-                    reference=f"{label} / vendors",
-                    detail=f"{len(report.vendors)} vendors scored",
-                )
-            )
-
-        if "countries" in sections and report.countries:
-            lines.append("[countries] riskiest-first")
-            for country in report.countries[:5]:
-                lines.append(
-                    f"  {country.country}: risk={country.risk_score}, "
-                    f"late={country.late_pct}%, shipments={country.shipment_count}"
-                )
-            sources.append(
-                ChatSource(
-                    kind="country",
-                    reference=f"{label} / countries",
-                    detail=f"{len(report.countries)} origin countries",
-                )
-            )
-
-        if "trend" in sections:
-            lines += [
-                "[trend]",
-                f"direction={report.trend.direction}; {report.trend.commentary}",
-            ]
-            for point in report.trend.points[-6:]:
-                lines.append(
-                    f"  {point.period}: n={point.shipment_count}, "
-                    f"late={point.late_pct}%, delay={point.avg_delay_days}d"
-                )
-            sources.append(
-                ChatSource(
-                    kind="trend",
-                    reference=f"{label} / trend",
-                    detail=report.trend.direction,
-                )
-            )
-
-        return "\n".join(lines), sources
+    return sources

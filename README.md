@@ -316,7 +316,11 @@ A few decisions that took more thought than the code suggests:
 
 **Then it was a speed problem, and the cost was in an exception handler.** 300,000 rows took 84 seconds. The culprit was date parsing: matching one of 18 formats means raising and catching a `ValueError` for every format ahead of the right one, twice per row — about 3M exceptions. But a year of shipments contains only a few hundred *distinct* date strings, so an `lru_cache` on the format search collapses those 3M attempts to a few hundred. Same 300,000 rows: **14 seconds**. Worth knowing where the time actually was before optimising anything structural.
 
-**Chat retrieval is keyword-routed, not vector-based.** For a fixed, small set of metric families, routing a question to the relevant slices is cheaper and more predictable than embedding search — and the answer cites which slices it used.
+**The assistant is a tool-using agent, not a retrieval template.** Chat started as a keyword router: the server scanned the question for words like "vendor" or "trend", decided which metrics to retrieve, and pasted them into one prompt. That answers questions whose shape you anticipated and fails *quietly* for the rest — a question about carriers retrieved vendor data because "who" was in the keyword list, and nothing reported that the wrong thing had been fetched.
+
+The model now gets nine tools (`get_vendor_scores`, `get_country_risk`, `get_trend`, `get_dimension`, …) and chooses its own retrieval over up to six steps. "Which carrier is worst, and is it getting better?" becomes a carrier lookup *then* a trend lookup — a sequence that can't be expressed as a keyword match, because the second call depends on the first one's answer. The cost is honest: one question is now 2–5 round trips instead of 1.
+
+Three properties make it safe to let a model drive retrieval. **Tenancy is enforced in the tools, not the prompt** — handlers resolve data through repositories scoped to one `user_id`, and the model passes a dataset *name*, never an ID it could invent, so a hallucinated argument cannot reach another tenant's rows. **Tool errors come back as data, not exceptions** — a raising tool ends the conversation, while one that reports `No dataset named 'q4'. Available: …` lets the model correct itself, which the tests exercise directly. And **every call is returned to the client**, so the UI shows the steps taken, including ones that failed and were retried; with the model choosing its own evidence, that trace is the only way a user can tell a grounded answer from a lucky one.
 
 ---
 

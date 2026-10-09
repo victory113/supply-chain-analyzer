@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
@@ -168,6 +169,119 @@ class ClaudeService:
         return await self._structured_call(
             prompt=build_comparison_prompt(before, after),
             schema_model=LLMComparisonPayload,
+        )
+
+    async def run_agent(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        execute: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+        max_steps: int = 6,
+    ) -> LLMResult[str]:
+        """Let the model choose which tools to call, over several steps.
+
+        The loop is the whole idea. A normal call is one request and one reply;
+        here the model may answer with "call these tools instead", we run them,
+        hand back the results, and ask again. It repeats until the model
+        produces prose instead of another tool request.
+
+        ``max_steps`` is a hard stop. Without it a model that keeps requesting
+        tools would loop until the request times out, and each step costs a
+        full round trip — so the bound is a cost and latency control, not just
+        a safety net.
+        """
+        started = time.perf_counter()
+        conversation = list(messages)
+        input_tokens = 0
+        output_tokens = 0
+        model_name = self.model
+
+        for step in range(max_steps):
+            try:
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=settings.anthropic_max_tokens,
+                    system=system,
+                    tools=tools,
+                    messages=conversation,  # type: ignore[arg-type]
+                )
+            except anthropic.APIStatusError as exc:
+                logger.error("claude_agent_error", status=exc.status_code, step=step)
+                raise UpstreamServiceError(
+                    f"The assistant returned an error ({exc.status_code})."
+                ) from exc
+            except anthropic.APIConnectionError as exc:
+                logger.error("claude_agent_connection_error", step=step)
+                raise UpstreamServiceError("Could not reach the assistant.") from exc
+
+            input_tokens += response.usage.input_tokens
+            output_tokens += response.usage.output_tokens
+            model_name = response.model
+
+            if response.stop_reason == "refusal":
+                raise UpstreamServiceError("The assistant declined to answer that.")
+
+            if response.stop_reason != "tool_use":
+                text = "".join(
+                    block.text for block in response.content if block.type == "text"
+                ).strip()
+                if not text:
+                    raise UpstreamServiceError("The assistant returned an empty response.")
+                return LLMResult(
+                    payload=text,
+                    model=model_name,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+
+            # The model asked for tools. Echo its message back verbatim, then
+            # append one result block per request — the API requires a result
+            # for every tool_use id, in the same user message.
+            conversation.append({"role": "assistant", "content": response.content})
+            results: list[dict[str, Any]] = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+                output = await execute(block.name, dict(block.input or {}))
+                results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(output, default=str),
+                    }
+                )
+            conversation.append({"role": "user", "content": results})
+
+        # Out of steps. Ask once more with tools withheld, so the user gets an
+        # answer from what was already gathered rather than an error.
+        logger.warning("claude_agent_step_limit", max_steps=max_steps)
+        conversation.append(
+            {
+                "role": "user",
+                "content": (
+                    "Stop calling tools and answer now using only what you have "
+                    "already retrieved. If it is not enough, say exactly what is missing."
+                ),
+            }
+        )
+        final = await self.client.messages.create(
+            model=self.model,
+            max_tokens=settings.anthropic_max_tokens,
+            system=system,
+            messages=conversation,  # type: ignore[arg-type]
+        )
+        input_tokens += final.usage.input_tokens
+        output_tokens += final.usage.output_tokens
+        text = "".join(b.text for b in final.content if b.type == "text").strip()
+        return LLMResult(
+            payload=text or "I could not complete that question within the step limit.",
+            model=final.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            duration_ms=int((time.perf_counter() - started) * 1000),
         )
 
     async def answer_question(
