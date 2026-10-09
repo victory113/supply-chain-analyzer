@@ -175,6 +175,18 @@ class TestRetrieval:
         assert result["rows"] == []
         assert "did not contain that column" in result["note"]
 
+    async def test_a_missing_dimension_points_at_the_next_step(self, session):
+        """Reporting the gap is not enough. Told only that the data is absent,
+        the model stops — even when another upload has the column it needs."""
+        user = await make_user(session, "sparse2@example.com")
+        await upload_for(session, user, label="sparse", csv=SPARSE_CSV)
+
+        result = await toolset_for(session, user).execute(
+            "get_dimension", {"dimension": "carriers"}
+        )
+
+        assert "list_datasets" in result["note"]
+
     async def test_a_dimension_the_file_has_returns_rows(self, session):
         user = await make_user(session, "carriers@example.com")
         await upload_for(session, user, label="rich")

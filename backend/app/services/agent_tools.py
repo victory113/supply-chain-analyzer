@@ -385,9 +385,15 @@ class AgentToolset:
                 "dataset": name,
                 "dimension": dimension,
                 "rows": [],
+                # Pointing at the next step matters more than reporting the
+                # gap. Told only that the data is absent, the model concludes
+                # the question is unanswerable and stops — even when another
+                # of the user's uploads has exactly the column it needs.
                 "note": (
                     f"This dataset has no {dimension} data - the uploaded file did not "
-                    "contain that column. The question cannot be answered from it."
+                    "contain that column. A different dataset may have it: call "
+                    "list_datasets and try the most likely one before concluding that "
+                    "the question cannot be answered."
                 ),
             }
 
