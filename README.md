@@ -82,14 +82,15 @@ backend/app/
 │   ├── uploads.py   ingest CSV, list, delete, sample data
 │   ├── analyses.py  poll status, read results, re-run, compare
 │   ├── analytics.py computed metrics (no AI call on any of these)
-│   ├── chat.py      retrieval-grounded Q&A
+│   ├── chat.py      chat with the tool-using agent
 │   └── health.py    liveness + readiness probes
 ├── services/        Business logic
 │   ├── analytics/   THE deterministic engine (kpis, vendors, countries,
 │   │                trends, risk, stats) — pure functions, no I/O
 │   ├── csv_ingest.py   column mapping, coercion, validation
 │   ├── analysis.py     ingestion + AI orchestration
-│   ├── chat.py         retrieval + intent routing
+│   ├── chat.py         the agent: system prompt, step cap, tool trace
+│   ├── agent_tools.py  the nine tools the agent can call, scoped to one user
 │   ├── claude.py       the only file that touches the Anthropic SDK
 │   ├── prompts.py      prompt construction (unit-testable, no network)
 │   └── auth.py         registration, login, token issuance
@@ -256,13 +257,13 @@ cd backend
 pytest --cov=app
 ```
 
-161 tests, all passing, in about 20 seconds.
+292 backend tests, all passing (the frontend adds 76 more with Vitest).
 
 | Suite | Covers |
 |---|---|
 | `tests/unit/test_analytics.py` | Every metric and scoring rule — the numbers the product reports |
 | `tests/unit/test_csv_ingest.py` | Header aliasing, type coercion, encodings, row rejection |
-| `tests/unit/test_security_and_prompts.py` | bcrypt, JWT expiry/tampering, prompt grounding, chat intent routing |
+| `tests/unit/test_security_and_prompts.py` | bcrypt, JWT expiry/tampering, prompt grounding |
 | `tests/unit/test_cache_and_broker.py` | Cache circuit breaker, Redis degradation, broker probe |
 | `tests/unit/test_enqueue_fallback.py` | Job enqueue falls back in-process when the broker is down |
 | `tests/db/test_init_db.py` | Local-dev schema bootstrap, and its refusal to run on Postgres |
@@ -270,6 +271,9 @@ pytest --cov=app
 | `tests/api/test_uploads_api.py` | Upload flow, pagination, **tenant isolation**, analytics endpoints |
 | `tests/db/test_repositories.py` | Query scoping, pagination, cascades |
 | `tests/db/test_analysis_service.py` | Full pipeline with Claude stubbed, incl. LLM-failure degradation |
+| `tests/unit/test_agent_loop.py` | The agent loop: chained tool calls, parallel calls, token totals, tool errors returned as data |
+| `tests/db/test_agent_tools.py` | Agent tools as untrusted input: another user's dataset never resolves, unknown names list valid options |
+| `tests/db/test_chat_service.py` | End to end with the model scripted: tools run on real data, the trace records each call in order |
 
 The suite runs on in-memory SQLite (the `GUID`/`JSON` column variants in `app/db/base.py` make the same models work on both engines), so it needs no services and finishes in seconds. CI additionally applies the migrations against real Postgres — `upgrade → downgrade → upgrade` — so schema changes are validated where they'll actually run.
 
@@ -298,7 +302,7 @@ A few decisions that took more thought than the code suggests:
 
 **Celery cannot be made to fail fast on publish.** Same session, worse symptom: with the broker down, uploads hung indefinitely. `retry=False` on `apply_async` disables *publish* retry, but kombu still runs its own connection loop (100 attempts by default), and turning that off globally would stop a live worker from reconnecting. So the API TCP-probes the broker itself before publishing and goes straight to the in-process fallback when nothing answers. Uploads went from hanging to 202-in-1.4s.
 
-**One canonical model, many source schemas.** Real companies receive shipment data from dozens of ERP, WMS, TMS and carrier systems that agree on nothing — so the app doesn't parse "a CSV format", it maps *any* export onto a ~50-field canonical shipment record and computes against that. Adding support for a new source system is an alias change, never an analytics change. Matching runs in two passes: ~350 exact aliases, then a fuzzy pass (`difflib`, 0.87 cutoff) that recovers typos like `Suppler Name` in someone's export. The cutoff is deliberately high — a *wrong* mapping is far worse than an unmapped column, because it silently feeds the wrong numbers into every metric downstream. Fuzzy matches are reported to the user as guesses rather than folded in with recognised columns.
+**One canonical model, many source schemas.** Real companies receive shipment data from dozens of ERP, WMS, TMS and carrier systems that agree on nothing — so the app doesn't parse "a CSV format", it maps *any* export onto a ~50-field canonical shipment record and computes against that. Adding support for a new source system is an alias change, never an analytics change. Matching runs in two passes: ~400 exact aliases, then a fuzzy pass (`difflib`, 0.87 cutoff) that recovers typos like `Suppler Name` in someone's export. The cutoff is deliberately high — a *wrong* mapping is far worse than an unmapped column, because it silently feeds the wrong numbers into every metric downstream. Fuzzy matches are reported to the user as guesses rather than folded in with recognised columns.
 
 **Ordering in that alias table is a load-bearing detail.** A header is claimed by the first canonical field that matches it, so when the model was widened, `carrier` never received a single column — `vendor` had listed `"carrier"` as one of its own aliases years earlier and silently ate it. `sku` and `brand` lost theirs to `product` the same way. There is now a test that walks the whole table and fails on any alias claimed twice; it caught two more dead entries (`pack_price`, `proNumber`) that could never have matched anything, because aliases are compared *after* normalisation and both contained characters normalisation strips.
 
@@ -339,7 +343,7 @@ frontend/src/
 │   ├── charts/      RiskGauge, DelayTrendChart, VendorHealthChart,
 │   │                CountryExposure, HistoryChart, shared dark tooltip
 │   ├── ui/          Card, Badge, Field, Spinner, loading/empty/error states
-│   ├── KpiGrid, RiskList, UploadDropzone, AnalysisProgress, Layout
+│   ├── KpiGrid, RiskList, UploadDropzone, AnalysisProgress, ToolTrace, Layout
 ├── hooks/         useAnalysisStatus — polls a queued analysis to completion
 ├── lib/format.ts  All display formatting, unit-tested
 └── pages/         Login, Register, Dashboard, Uploads, UploadDetail,
@@ -399,7 +403,7 @@ The original single-file v1 UI is preserved at [legacy/v1-single-file-ui.html](l
 - [x] Persisted uploads, shipments, analyses, and risks
 - [x] Asynchronous processing with Celery + Redis
 - [x] Redis response caching
-- [x] Retrieval-grounded AI chat over stored data
+- [x] Tool-using AI agent over stored data (nine user-scoped tools, visible call trace)
 - [x] Structured logging, health/readiness probes, request tracing
 - [x] Docker Compose, GitHub Actions CI, Render blueprint
 - [x] React + TypeScript dashboard — charts, upload history, compare, AI chat

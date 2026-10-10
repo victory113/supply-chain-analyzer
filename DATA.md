@@ -31,7 +31,7 @@ Matching happens in two passes:
 
 1. **Alias.** Headers are lowercased and stripped of punctuation, so
    `Unit Cost`, `unit_cost`, `UNIT-COST` and `unitcost` are the same column.
-   Around 350 aliases are recognised.
+   Around 400 aliases are recognised.
 2. **Fuzzy.** Anything left over is matched by similarity, so a typo in your
    source system (`Suppler Name`, `Frght Cost`) still lands correctly. These are
    flagged separately in the upload summary as guesses, not recognised columns.
