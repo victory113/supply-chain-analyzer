@@ -17,6 +17,7 @@ import anthropic
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
+from app.core import metrics
 from app.core.config import settings
 from app.core.exceptions import UpstreamServiceError
 from app.core.logging import get_logger
@@ -52,6 +53,14 @@ class LLMResult(Generic[ResultT]):
     input_tokens: int
     output_tokens: int
     duration_ms: int
+
+    def __post_init__(self) -> None:
+        # Every model call in the app — analysis, comparison, chat agent,
+        # free-text answer — ends by building one of these, so recording usage
+        # here catches all of them and any path added later. It does couple a
+        # data class to a counter, which is the trade: one line that cannot be
+        # forgotten, versus four call sites that can.
+        metrics.observe_tokens(self.input_tokens, self.output_tokens)
 
 
 def _json_schema(model: type[BaseModel]) -> dict[str, Any]:

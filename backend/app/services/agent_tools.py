@@ -28,6 +28,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.core.logging import get_logger
 from app.repositories.analysis import AnalysisRepository
 from app.repositories.upload import UploadRepository
@@ -223,18 +224,21 @@ class AgentToolset:
             self.calls.append(
                 ToolCall(name=name, arguments=arguments, ok=False, summary="unknown tool")
             )
+            metrics.agent_tool_calls_total.labels(tool=name, ok="false").inc()
             return {"error": f"No tool named {name!r}."}
 
         try:
             result = await handler(arguments)
         except LookupError as exc:
             self.calls.append(ToolCall(name=name, arguments=arguments, ok=False, summary=str(exc)))
+            metrics.agent_tool_calls_total.labels(tool=name, ok="false").inc()
             return {"error": str(exc)}
         except Exception as exc:  # surfaced to the model as data, not raised
             logger.exception("agent_tool_failed", tool=name)
             self.calls.append(
                 ToolCall(name=name, arguments=arguments, ok=False, summary="internal error")
             )
+            metrics.agent_tool_calls_total.labels(tool=name, ok="false").inc()
             return {"error": f"The {name} tool failed: {exc}"}
 
         self.calls.append(
@@ -245,6 +249,7 @@ class AgentToolset:
                 summary=_describe(name, result),
             )
         )
+        metrics.agent_tool_calls_total.labels(tool=name, ok="true").inc()
         return result
 
     def datasets_touched(self) -> set[str]:

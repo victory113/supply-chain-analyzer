@@ -7,11 +7,13 @@ LLM narration on top. If Claude is down, the dashboard still works.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import IO
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.core.exceptions import NotFoundError, UpstreamServiceError, ValidationError
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, Risk
@@ -97,6 +99,11 @@ class AnalysisService:
         await self.analyses.add(analysis)
         await self.session.commit()
 
+        metrics.uploads_total.inc()
+        metrics.rows_ingested_total.inc(stats.accepted)
+        metrics.rows_rejected_total.inc(stats.rejected)
+        metrics.delays_derived_total.inc(stats.derived_delays)
+
         logger.info(
             "upload_created",
             upload_id=str(upload.id),
@@ -181,6 +188,7 @@ class AnalysisService:
 
         analysis.status = AnalysisStatus.RUNNING
         await self.session.commit()
+        started = time.perf_counter()
 
         try:
             report = await self.build_report(analysis.upload_id, use_cache=False)
@@ -240,6 +248,11 @@ class AnalysisService:
         await self.session.commit()
         # The user's history rollup now includes this upload.
         await cache.cache_delete(cache.history_key(str(upload.user_id)))
+
+        # Recorded for both outcomes: a rising failure rate is the thing worth
+        # alerting on, and it is invisible if only successes are counted.
+        metrics.analyses_total.labels(status=str(analysis.status)).inc()
+        metrics.analysis_duration_seconds.observe(time.perf_counter() - started)
 
         logger.info("analysis_finished", analysis_id=str(analysis_id), status=analysis.status)
         return analysis

@@ -83,7 +83,7 @@ backend/app/
 │   ├── analyses.py  poll status, read results, re-run, compare
 │   ├── analytics.py computed metrics (no AI call on any of these)
 │   ├── chat.py      chat with the tool-using agent
-│   └── health.py    liveness + readiness probes
+│   └── health.py    liveness + readiness probes, Prometheus metrics
 ├── services/        Business logic
 │   ├── analytics/   THE deterministic engine (kpis, vendors, countries,
 │   │                trends, risk, stats) — pure functions, no I/O
@@ -143,6 +143,7 @@ The dependency direction is strictly one-way: `api → services → repositories
 | `GET` | `/api/v1/analytics/history` | Cross-upload trend |
 | `POST` | `/api/v1/chat` | Grounded Q&A with cited sources |
 | `GET` | `/api/v1/health`, `/health/ready` | Liveness / readiness |
+| `GET` | `/api/v1/metrics` | Prometheus scrape (text format, excluded from OpenAPI) |
 
 Interactive docs at `/docs` once running.
 
@@ -310,6 +311,8 @@ A few decisions that took more thought than the code suggests:
 
 **A sleeping server is not a failed request.** The free tier spins down after ~15 minutes idle, and while the container boots the platform edge answers with a bare `503`. The app used to surface that verbatim — `Request failed with status 503` on the login screen, which reads as "this project is broken" to anyone clicking the demo link. The distinction that fixes it: *our* 5xx responses carry the JSON error envelope, the platform's do not, so an envelope-less `502/503/504` provably never reached the app. Those are retried with backoff (up to ~42s) behind a "waking the server" notice, and everything else fails immediately as before. Retrying a `POST` is safe for exactly the same reason — a gateway error means nothing was processed.
 
+**A metric label is a decision about cost, not just a name.** Prometheus stores one time series per distinct label combination, so HTTP metrics are labelled by the matched *route template* — `/api/v1/uploads/{upload_id}` — and never by `request.url.path`. Labelling by path would mint a fresh series for every upload ID anyone has ever fetched, and the bill arrives months later as a Prometheus that no longer fits in memory. Requests that match no route collapse into a single `unmatched` bucket for the same reason: a 404 scanner must not be able to create unbounded series. The `/metrics` endpoint is unauthenticated like the probes, which is only safe because the payload is aggregate — counts and durations, never a user, filename or vendor — and there's a test asserting exactly that.
+
 **Lane analysis is computed but never sent to the model.** A lane label embeds the destination, which in real exports is routinely a customer name or a street address — the field in this model most likely to carry personal data. It's computed locally and shown to the data's owner; enriching an LLM narration doesn't justify putting it on the wire to a third party. There's a test asserting lane labels stay out of the prompt.
 
 **Ingestion is forgiving about cells, strict about rows.** Real exports are inconsistent, so columns are matched by alias (`"Unit Cost"`, `"unit_cost"`, `"unitprice"` all resolve), the delimiter is sniffed (`, ; tab |`), encodings fall back through UTF-8-BOM → cp1252, and an unparseable cell becomes null. A row is rejected only when *every* recognised column is empty — an earlier rule demanded a vendor, reference or product specifically, and silently threw away entire public datasets whose identity column happened to be named something else. Rejection counts are surfaced, not hidden.
@@ -404,7 +407,7 @@ The original single-file v1 UI is preserved at [legacy/v1-single-file-ui.html](l
 - [x] Asynchronous processing with Celery + Redis
 - [x] Redis response caching
 - [x] Tool-using AI agent over stored data (nine user-scoped tools, visible call trace)
-- [x] Structured logging, health/readiness probes, request tracing
+- [x] Structured logging, health/readiness probes, request tracing, Prometheus metrics
 - [x] Docker Compose, GitHub Actions CI, Render blueprint
 - [x] React + TypeScript dashboard — charts, upload history, compare, AI chat
 - [ ] True choropleth map (needs a vendored world topojson)
