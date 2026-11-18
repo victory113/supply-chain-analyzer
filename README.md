@@ -8,7 +8,7 @@ Create an account with any email, click **Try sample data**, and the dashboard f
 
 Bringing your own file? Any shipment or order CSV up to 100 MB works, without renaming a single column — [**what files can I upload?**](./DATA.md)
 
-> **The demo stays awake.** The API runs on a free tier that sleeps after 15 idle minutes, so a [Cloudflare Worker](https://github.com/victory113/sca-keepalive) pings it every 10 minutes ([live status](https://sca-keepalive.sca-keepalive.workers.dev)). If it ever does fall asleep, the app retries automatically behind a "waking the server" notice; no need to reload.
+> **The demo stays awake.** The API runs on a free tier that sleeps after 15 idle minutes, so a [Cloudflare Worker](https://github.com/victory113/sca-keepalive) pings it every 10 minutes ([live status](https://sca-keepalive.victoryorobosa.workers.dev)). If it ever does fall asleep, the app retries automatically behind a "waking the server" notice; no need to reload.
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white)
