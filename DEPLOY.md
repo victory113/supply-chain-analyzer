@@ -192,7 +192,7 @@ not embarrassments.
 
 | Limitation | Consequence | Fix |
 |---|---|---|
-| Render free tier sleeps after 15 min | First visit takes 30–60s | $7/mo, or a cron ping every 10 min |
+| Render free tier sleeps after 15 min | First visit takes 30–60s | Done: a Cloudflare Worker cron pings it every 10 min ([sca-keepalive](https://github.com/victory113/sca-keepalive)); or $7/mo |
 | No Celery worker on free tier | Analysis runs in-process | Paid worker service; code already supports it |
 | No Redis | No caching; every analytics call recomputes | Upstash free tier, set `REDIS_URL` |
 | Neon free tier | 0.5 GB, autosuspends | Plenty for a demo |
